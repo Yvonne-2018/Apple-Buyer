@@ -7,6 +7,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from duo_killer import Checkout, main
 import duo_killer
@@ -52,6 +53,22 @@ def contact_model(mixed=True):
             'd': {'verificationToken': '', 'authRequired': False}}}}}, 'eFapiaoSelector': deepcopy(INVOICE)}}}
 
 
+def pickup_time_model():
+    model = fulfillment_model(mixed=False)
+    options.value(model, 'checkout.fulfillment.pickupTab.pickup')['timeSlot'] = {
+        'd': {'storeId': 'R580', 'enableTimeSlotWindows': True}, 'dateTimeSlots': {'d': {
+            'date': '2026-10-14', 'timeSlotValue': '',
+            'pickUpDates': [{'dayOfMonth': '14', 'date': '2026-10-14'},
+                            {'dayOfMonth': '15', 'date': '2026-10-15'}],
+            'timeSlotWindows': [{'14': [{'timeSlotValue': '14-10:15-10:30', 'Label': '10:15 – 10:30',
+                'SlotId': 'test-slot-14', 'signKey': 'test-sign-14', 'timeZone': 'Asia/Shanghai',
+                'checkInStart': '10:15 AM', 'checkInEnd': '10:30 AM'}]},
+                {'15': [{'timeSlotValue': '15-11:00-11:15', 'Label': '11:00 – 11:15',
+                'SlotId': 'test-slot-15', 'signKey': 'test-sign-15', 'timeZone': 'Asia/Shanghai',
+                'checkInStart': '11:00 AM', 'checkInEnd': '11:15 AM'}]}]}}}
+    return model
+
+
 def shipping_model(invoice=False):
     address = {'d': {'selectAddress': 'address-0', 'radioAddresses': [
         {'value': 'address-0', 'isSavedAddress': True, 'addressLine1': '测试旧地址'}, {'value': 'newAddr'}]},
@@ -59,7 +76,7 @@ def shipping_model(invoice=False):
             'stateCitySelectorForCheckout': deepcopy(REGION)}}}
     # HAR 新地址地区选择只有 Selectstate/Selectcity，区县随继续表单提交。
     address['newAddress']['address']['stateCitySelectorForCheckout']['a'].pop('Selectdistrict')
-    node = {'addressSelector': address, 'addressNotification': {'address': {'d': {'emailAddress': 'test@example.invalid'}}}}
+    node = {'a': {'continueFromShippingToBilling': {}}, 'addressSelector': address, 'addressNotification': {'address': {'d': {'emailAddress': 'test@example.invalid'}}}}
     if invoice:
         node['eFapiaoSelector'] = deepcopy(INVOICE)
     return {'checkout': {'d': {'page': 'Shipping'}, 'shipping': node}}
@@ -82,7 +99,7 @@ class FakeFlow(Checkout):
             self.model = contact_model(self.mixed)
         elif name in ('continueFromFulfillmentToShipping', 'continueFromPickupContactToShipping'):
             self.model = shipping_model()
-        elif name in ('continueFromShippingToBilling', 'continueFromPickupContactToBilling'):
+        elif name in ('continueFromShippingToBilling', 'continueFromShippingToUnknown', 'continueFromPickupContactToBilling'):
             self.model = {'checkout': {'d': {'page': 'Billing'}, 'billing': {}}}
         elif name.startswith('Select'):
             node = self.require(module)['d']
@@ -122,6 +139,166 @@ class CheckoutOptionsTests(unittest.TestCase):
         self.assertEqual(set(flow.calls[5][2]), {'checkout.shipping.addressNotification.address.emailAddress',
                                                'checkout.shipping.addressSelector.selectAddress'})
         self.assertEqual(flow.model['checkout']['d']['page'], 'Billing')
+
+    def test_prefilled_city_and_store_select_exact_available_store(self):
+        flow = FakeFlow(fulfillment_model(mixed=False), mixed=False)
+        preferences = {'mode': 'RETAIL', 'city': '成都', 'store': '测试门店'}
+        with patch.object(options.interaction, 'handler', SimpleNamespace(checkout_preferences=preferences, stage=lambda *_: None)), \
+                patch('builtins.input', side_effect=AssertionError('预设完整时不应再次询问')):
+            options.fulfillment(flow, self.path)
+        self.assertEqual([name for _, name, _ in flow.calls], [
+            'selectFulfillmentLocationAction', 'search', 'select',
+            'continueFromFulfillmentToPickupContact', 'continueFromPickupContactToBilling'])
+        self.assertEqual(flow.calls[2][2]['checkout.fulfillment.pickupTab.pickup.storeLocator.selectStore'], 'R580')
+
+    def test_official_apple_store_name_matches_checkout_name(self):
+        model = fulfillment_model(mixed=False)
+        region = options.value(model, 'checkout.fulfillment.pickupTab.pickup.storeLocator.address.stateCitySelectorForCheckout.d')
+        region.update(state='江苏', city='无锡', district='惠山区', provinceCityDistrict='江苏 无锡 惠山区')
+        stores = options.value(model, 'checkout.fulfillment.pickupTab.pickup.storeLocator.searchResults.d.retailStores')
+        stores[0]['storeId'] = 'R574'
+        stores[0]['storeName'] = '无锡恒隆广场'
+        flow = FakeFlow(model, mixed=False)
+        preferences = {'mode': 'RETAIL', 'city': '无锡', 'store': 'Apple 无锡恒隆广场'}
+        with patch.object(options.interaction, 'handler', SimpleNamespace(checkout_preferences=preferences, stage=lambda *_: None)), \
+                patch('builtins.input', side_effect=AssertionError('门店应自动匹配')):
+            options.fulfillment(flow, self.path)
+        self.assertEqual(flow.calls[2][2]['checkout.fulfillment.pickupTab.pickup.storeLocator.selectStore'], 'R574')
+        locator = 'checkout.fulfillment.pickupTab.pickup.storeLocator'
+        self.assertEqual(flow.calls[1][2][locator + '.searchInput'], '江苏 无锡 惠山区')
+
+    def test_pickup_city_change_updates_region_before_search(self):
+        flow = FakeFlow(fulfillment_model(mixed=False), mixed=False)
+        locator = 'checkout.fulfillment.pickupTab.pickup.storeLocator'
+        region = locator + '.address.stateCitySelectorForCheckout'
+        with patch('builtins.input', side_effect=AssertionError('完整地区无需询问')):
+            data = options.pickup_search_data(flow, locator, '上海市',
+                {'state': '上海', 'city': '上海市', 'district': '浦东新区'})
+        self.assertEqual(data[locator + '.searchInput'], '上海 浦东新区')
+        self.assertEqual(data[region + '.city'], '上海')
+        self.assertEqual(flow.calls[0][2][region + '.city'], '')
+        self.assertEqual(flow.calls[0][2][region + '.district'], '')
+
+    def test_pickup_search_preserves_full_region_from_apple(self):
+        flow = FakeFlow(fulfillment_model(mixed=False), mixed=False)
+        locator = 'checkout.fulfillment.pickupTab.pickup.storeLocator'
+        data = options.pickup_search_data(flow, locator, '成都市', {})
+        self.assertEqual(data[locator + '.searchInput'], '四川 成都 锦江区')
+        self.assertEqual(flow.calls, [])
+
+    def test_pickup_time_required_fields_reach_continue_payload(self):
+        flow = FakeFlow(pickup_time_model(), mixed=False)
+        preferences = {'mode': 'RETAIL', 'city': '成都', 'store': '测试门店'}
+        handler = SimpleNamespace(checkout_preferences=preferences, stage=lambda *_: None,
+            choose=lambda label, choices, default: default)
+        with patch.object(options.interaction, 'handler', handler):
+            options.fulfillment(flow, self.path)
+        payload = next(data for _, name, data in flow.calls if name == 'continueFromFulfillmentToPickupContact')
+        prefix = 'checkout.fulfillment.pickupTab.pickup.timeSlot.dateTimeSlots.'
+        self.assertEqual(payload[prefix + 'date'], '2026-10-14')
+        self.assertEqual(payload[prefix + 'dayRadio'], '14')
+        self.assertEqual(payload[prefix + 'timeSlotValue'], '14-10:15-10:30')
+        self.assertEqual(payload[prefix + 'timeSlotId'], 'test-slot-14')
+        self.assertEqual(payload[prefix + 'signKey'], 'test-sign-14')
+        self.assertEqual(payload[prefix + 'startTime'], '10:15 AM')
+        self.assertEqual(payload[prefix + 'isRecommended'], 'false')
+
+    def test_pickup_time_automatically_uses_earliest_date_even_with_later_default(self):
+        flow = FakeFlow(pickup_time_model(), mixed=False)
+        data = options.value(flow.model, 'checkout.fulfillment.pickupTab.pickup.timeSlot.dateTimeSlots.d')
+        data['date'] = '2026-10-15'
+        data['pickUpDates'].reverse()
+        handler = SimpleNamespace(stage=lambda *_: None)
+        with patch.object(options.interaction, 'handler', handler):
+            payload = options.pickup_time_data(flow, 'R580')
+        prefix = 'checkout.fulfillment.pickupTab.pickup.timeSlot.dateTimeSlots.'
+        self.assertEqual(payload[prefix + 'date'], '2026-10-14')
+        self.assertEqual(payload[prefix + 'signKey'], 'test-sign-14')
+        self.assertEqual(payload[prefix + 'timeSlotId'], 'test-slot-14')
+
+    def test_pickup_time_rejects_another_store(self):
+        flow = FakeFlow(pickup_time_model(), mixed=False)
+        with self.assertRaisesRegex(ValueError, '门店不一致'):
+            options.pickup_time_data(flow, 'R574')
+        self.assertEqual(flow.calls, [])
+
+    def test_pickup_asks_for_required_identity_suffix_and_submits_correct_field(self):
+        model = contact_model(mixed=False)
+        model['checkout']['pickupContact']['selfPickupContact']['nationalIdSelf'] = {
+            'd': {'enabled': True, 'nationalIdSelf': ''}}
+        flow = FakeFlow(model, mixed=False)
+        config = deepcopy(CONFIG)
+        with patch.object(options, 'ask', return_value='123x') as ask:
+            options.pickup_contact(flow, config, self.path)
+        ask.assert_called_once()
+        data = flow.calls[0][2]
+        self.assertEqual(data['checkout.pickupContact.selfPickupContact.nationalIdSelf.nationalIdSelf'], '123X')
+        self.assertNotIn('checkout.pickupContact.selfPickupContact.selfContact.address.nationalIdLast4', data)
+        self.assertEqual(options.read_config(self.path)['contact']['nationalIdLast4'], '123X')
+
+    def test_pickup_reuses_saved_identity_suffix_without_prompt(self):
+        model = contact_model(mixed=False)
+        model['checkout']['pickupContact']['selfPickupContact']['nationalIdSelf'] = {'d': {'enabled': True}}
+        flow = FakeFlow(model, mixed=False)
+        config = deepcopy(CONFIG)
+        config['contact']['nationalIdLast4'] = '1234'
+        with patch.object(options, 'ask', side_effect=AssertionError('已配置时不再询问')):
+            options.pickup_contact(flow, config, self.path)
+        self.assertEqual(flow.model['checkout']['d']['page'], 'Billing')
+
+    def test_pickup_earliest_time_does_not_depend_on_returned_order(self):
+        flow = FakeFlow(pickup_time_model(), mixed=False)
+        data = options.value(flow.model, 'checkout.fulfillment.pickupTab.pickup.timeSlot.dateTimeSlots.d')
+        later = deepcopy(data['timeSlotWindows'][0]['14'][0])
+        later.update(timeSlotValue='14-14:00-14:15', SlotId='later', signKey='later-sign')
+        data['timeSlotWindows'][0]['14'].insert(0, later)
+        with patch.object(options, 'choose', side_effect=AssertionError('时段不能要求用户选择')):
+            payload = options.pickup_time_data(flow, 'R580')
+        self.assertEqual(payload['checkout.fulfillment.pickupTab.pickup.timeSlot.dateTimeSlots.timeSlotId'], 'test-slot-14')
+
+    def test_pickup_time_empty_windows_prevent_continuation(self):
+        model = pickup_time_model()
+        options.value(model, 'checkout.fulfillment.pickupTab.pickup.timeSlot.dateTimeSlots.d')['timeSlotWindows'] = []
+        flow = FakeFlow(model, mixed=False)
+        handler = SimpleNamespace(checkout_preferences={'mode': 'RETAIL', 'city': '成都', 'store': '测试门店'},
+                                  stage=lambda *_: None)
+        with patch.object(options.interaction, 'handler', handler), self.assertRaisesRegex(ValueError, '没有可用取货签到时段'):
+            options.fulfillment(flow, self.path)
+        self.assertFalse(any(name.startswith('continue') for _, name, _ in flow.calls))
+
+    def test_disabled_prefilled_store_reports_unavailable(self):
+        flow = FakeFlow(fulfillment_model(mixed=False), mixed=False)
+        preferences = {'mode': 'RETAIL', 'city': '成都', 'store': 'Apple 不可选门店'}
+        with patch.object(options.interaction, 'handler', SimpleNamespace(checkout_preferences=preferences, stage=lambda *_: None)), \
+                patch('time.sleep'), self.assertRaisesRegex(ValueError, '存在，但当前商品暂不可'):
+            options.fulfillment(flow, self.path)
+        self.assertFalse(any(name == 'select' for _, name, _ in flow.calls))
+
+    def test_store_search_error_does_not_claim_store_is_missing(self):
+        model = fulfillment_model(mixed=False)
+        locator = options.value(model, 'checkout.fulfillment.pickupTab.pickup.storeLocator')
+        locator['searchResults']['d'] = {}
+        locator['d']['isStoreSearchErrorPresent'] = True
+        locator['address']['stateCitySelectorForCheckout']['d'].update(
+            state='江苏', city='无锡', district='惠山区', provinceCityDistrict='江苏 无锡 惠山区')
+        flow = FakeFlow(model, mixed=False)
+        preferences = {'mode': 'RETAIL', 'city': '无锡', 'store': 'Apple 无锡恒隆广场'}
+        with patch.object(options.interaction, 'handler', SimpleNamespace(checkout_preferences=preferences, stage=lambda *_: None)), \
+                patch('time.sleep') as pause, self.assertRaisesRegex(ValueError, '当前商品可能无法在该地区取货'):
+            options.fulfillment(flow, self.path)
+        self.assertEqual(sum(name == 'search' for _, name, _ in flow.calls), 3)
+        self.assertEqual(pause.call_count, 2)
+        self.assertFalse(any(name == 'select' for _, name, _ in flow.calls))
+
+    def test_unavailable_prefilled_store_refreshes_without_submitting(self):
+        flow = FakeFlow(fulfillment_model(mixed=False), mixed=False)
+        preferences = {'mode': 'RETAIL', 'city': '成都', 'store': '不存在的门店'}
+        with patch.object(options.interaction, 'handler', SimpleNamespace(checkout_preferences=preferences, stage=lambda *_: None)), \
+                patch('time.sleep') as pause, self.assertRaisesRegex(ValueError, '未找到'):
+            options.fulfillment(flow, self.path)
+        self.assertEqual(sum(name == 'search' for _, name, _ in flow.calls), 30)
+        self.assertEqual(pause.call_count, 29)
+        self.assertFalse(any(name.startswith('continue') for _, name, _ in flow.calls))
 
     def test_home_and_saved_address(self):
         flow = FakeFlow(fulfillment_model())
@@ -512,3 +689,173 @@ class CheckoutOptionsTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class DirectShippingFormTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = Path(self.temp.name) / 'checkout.json'
+        options.save_config(self.path, deepcopy(CONFIG))
+
+    def flow(self):
+        flow = FakeFlow(shipping_model())
+        node = flow.require('checkout.shipping')
+        node['a'] = {'continueFromShippingToUnknown': {}}
+        node['addressSelector']['d'] = {'selectAddress': 'newAddr'}
+        node['addressSelector']['savedAddresses'] = {}
+        for section, key, old in [('addressContactEmail', 'emailAddress', 'old@example.invalid'),
+                                  ('addressContactPhone', 'mobilePhone', '13900000000')]:
+            node[section] = {'address': {'d': {key: old, 'was': {key: old}},
+                'b': {key: {'submit': {'op': '!EQ', 'args': [{'val': '_'}, {'get': 'd.was.' + key}]}}}}}
+        return flow
+
+    def test_direct_form_without_radio_options_reaches_billing(self):
+        flow = self.flow()
+        with patch.object(options, 'ask', side_effect=AssertionError('unexpected prompt')):
+            options.shipping(flow, self.path)
+        payload = flow.calls[-1][2]
+        self.assertEqual(flow.calls[-1][1], 'continueFromShippingToUnknown')
+        self.assertEqual(payload['checkout.shipping.addressSelector.selectAddress'], 'newAddr')
+        self.assertEqual(payload['checkout.shipping.addressContactEmail.address.emailAddress'], CONTACT['emailAddress'])
+        self.assertEqual(payload['checkout.shipping.addressContactPhone.address.mobilePhone'], CONTACT['fullDaytimePhone'])
+        self.assertEqual(options.value(flow.model, 'checkout.d.page'), 'Billing')
+
+    def test_direct_form_requires_explicit_current_new_address(self):
+        flow = self.flow()
+        flow.require('checkout.shipping.addressSelector')['d']['selectAddress'] = 'unknown'
+        with self.assertRaisesRegex(ValueError, '没有可用的收货地址'):
+            options.shipping(flow, self.path)
+        self.assertEqual(flow.calls, [])
+
+    def test_explicitly_disabled_new_address_is_not_enabled_by_fallback(self):
+        flow = self.flow()
+        flow.require('checkout.shipping.addressSelector')['d']['radioAddresses'] = [{'value': 'newAddr', 'disabled': True}]
+        with self.assertRaisesRegex(ValueError, '没有可用的收货地址'):
+            options.shipping(flow, self.path)
+        self.assertEqual(flow.calls, [])
+
+    def test_ambiguous_continue_action_stops(self):
+        flow = self.flow()
+        flow.require('checkout.shipping')['a']['continueFromShippingToBilling'] = {}
+        with self.assertRaisesRegex(ValueError, '唯一可识别'):
+            options.shipping(flow, self.path)
+        self.assertFalse(any(name.startswith('continueFromShipping') for _, name, _ in flow.calls))
+
+    def test_unchanged_masked_contact_is_not_resubmitted(self):
+        node = {'d': {'was': {'mobilePhone': '138****0000'}}, 'b': {'mobilePhone': {
+            'submit': {'op': '!EQ', 'args': [{'val': '_'}, {'get': 'd.was.mobilePhone'}]}}}}
+        self.assertFalse(options.should_submit_contact(node, 'mobilePhone', '138****0000'))
+        self.assertTrue(options.should_submit_contact(node, 'mobilePhone', '13800000000'))
+        node['b']['mobilePhone']['submit'] = {'op': 'UNKNOWN'}
+        with self.assertRaisesRegex(ValueError, '规则无法识别'):
+            options.should_submit_contact(node, 'mobilePhone', '13800000000')
+
+
+class PreservePickupIdentityTests(unittest.TestCase):
+    def test_shipping_keeps_saved_pickup_identity(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'checkout.json'
+            config = deepcopy(CONFIG)
+            config['contact']['nationalIdLast4'] = '123X'
+            options.save_config(path, config)
+            flow = FakeFlow(shipping_model())
+            with patch.object(options, 'choose', return_value='newAddr'):
+                options.shipping(flow, path)
+            self.assertEqual(options.read_config(path)['contact']['nationalIdLast4'], '123X')
+            self.assertFalse(any('nationalIdLast4' in key for key in flow.calls[-1][2]))
+
+    def test_product_without_identity_requirement_preserves_it_for_next_purchase(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'checkout.json'
+            config = deepcopy(CONFIG)
+            config['contact']['nationalIdLast4'] = '123X'
+            options.save_config(path, config)
+            options.pickup_contact(FakeFlow(contact_model(False), mixed=False), config, path)
+            saved = options.read_config(path)
+            self.assertEqual(saved['contact']['nationalIdLast4'], '123X')
+            flow = FakeFlow(contact_model(False), mixed=False)
+            flow.require('checkout.pickupContact.selfPickupContact')['nationalIdSelf'] = {'d': {'enabled': True}}
+            with patch.object(options, 'ask', side_effect=AssertionError('must use saved suffix')):
+                options.pickup_contact(flow, saved, path)
+            self.assertEqual(flow.calls[-1][2]['checkout.pickupContact.selfPickupContact.nationalIdSelf.nationalIdSelf'], '123X')
+
+
+class CrossCityPickupTests(unittest.TestCase):
+    def flow(self):
+        flow = FakeFlow(fulfillment_model(False), mixed=False)
+        path = 'checkout.fulfillment.pickupTab.pickup.storeLocator.address.stateCitySelectorForCheckout'
+        node = flow.require(path)['d']
+        node.update(state='江苏', city='无锡', district='梁溪区', provinceCityDistrict='江苏 无锡 梁溪区',
+                    stateOptions=[{'value':'江苏'}], cityOptions=[{'value':'无锡'}, {'value':'苏州'}])
+        original = flow.action
+        def action(module, name, data=None):
+            original(module, name, data)
+            if name == 'Selectcity':
+                flow.require(path)['d'].update(district='', districtOptions=[{'value':'姑苏区'}, {'value':'吴中区'}])
+        flow.action = action
+        return flow, path
+
+    def test_cross_city_search_selects_official_district_without_prompt(self):
+        flow, path = self.flow()
+        locator = path.removesuffix('.address.stateCitySelectorForCheckout')
+        with patch.object(options, 'choose', side_effect=AssertionError('unexpected prompt')):
+            data = options.pickup_search_data(flow, locator, '苏州', {'state':'江苏','city':'无锡','district':'惠山区'})
+        self.assertEqual(data[locator+'.searchInput'], '江苏 苏州 姑苏区')
+        self.assertEqual(data[locator+'.selectStore'], '')
+
+    def test_delivery_does_not_guess_district(self):
+        flow, path = self.flow()
+        with patch.object(options, 'choose', side_effect=ValueError('district required')):
+            with self.assertRaisesRegex(ValueError, 'district required'):
+                options.region_data(flow, path, {'state':'江苏','city':'苏州'})
+
+    def test_explicit_pickup_district_is_respected(self):
+        flow, path = self.flow()
+        locator = path.removesuffix('.address.stateCitySelectorForCheckout')
+        with patch.object(options, 'choose', side_effect=AssertionError('unexpected prompt')):
+            data = options.pickup_search_data(flow, locator, '苏州', {'state':'江苏','city':'苏州','district':'吴中区'})
+        self.assertEqual(data[locator+'.searchInput'], '江苏 苏州 吴中区')
+
+class PickupProvinceResolutionTests(unittest.TestCase):
+    def test_blank_municipality_uses_fixed_city_and_live_districts(self):
+        flow = FakeFlow(fulfillment_model(False), mixed=False)
+        locator = 'checkout.fulfillment.pickupTab.pickup.storeLocator'
+        path = locator + '.address.stateCitySelectorForCheckout'
+        node = flow.require(path)
+        node['d'].update(state='', city='', district='', stateOptions=[{'value':'上海'}, {'value':'江苏'}], cityOptions=[], districtOptions=[])
+        calls = []
+        def action(module, name, payload):
+            calls.append(name)
+            if name == 'Selectstate':
+                # Exact shape observed live: city fixed, no cityOptions; state not echoed.
+                node['d'].update(city='上海', cityOptions=[], districtOptions=[{'value':'黄浦区'}, {'value':'普陀区'}])
+        flow.action = action
+        with patch.object(options, 'choose', side_effect=AssertionError('unexpected prompt')):
+            data = options.pickup_search_data(flow, locator, '上海市', {'state':'江苏','city':'无锡','district':'惠山区'})
+        self.assertEqual(data[locator+'.searchInput'], '上海 黄浦区')
+        self.assertEqual(data[path+'.city'], '上海')
+        self.assertEqual(calls, ['Selectstate', 'Selectdistrict'])
+
+    def test_directory_maps_cross_province_city_without_using_saved_home(self):
+        current = {'state':'江苏', 'cityOptions':[{'value':'苏州'}], 'stateOptions':[{'value':'江苏'}, {'value':'浙江'}]}
+        store = {'__typename':'RgdsStore','address':{'city':'杭州','stateName':'浙江'}}
+        document = '<script id="__NEXT_DATA__">'+json.dumps({'stores':[store,store]})+'</script>'
+        response = SimpleNamespace(text=document, raise_for_status=lambda:None)
+        with patch.object(duo_killer, 'request_get', return_value=response):
+            self.assertEqual(options.pickup_state(SimpleNamespace(session=object()), current, '杭州市'), '浙江')
+
+    def test_ambiguous_or_unknown_city_does_not_guess_province(self):
+        current = {'stateOptions':[{'value':'江苏'}, {'value':'浙江'}]}
+        stores = [{'__typename':'RgdsStore','address':{'city':'测试市','stateName':state}} for state in ('江苏','浙江')]
+        response = SimpleNamespace(text='<script id="__NEXT_DATA__">'+json.dumps(stores)+'</script>', raise_for_status=lambda:None)
+        with patch.object(duo_killer, 'request_get', return_value=response):
+            for city in ('测试市', '不存在'):
+                with self.assertRaisesRegex(ValueError, '无法从官网门店目录'):
+                    options.pickup_state(SimpleNamespace(session=object()), current, city)
+
+    def test_wrong_city_never_silently_uses_current_default(self):
+        flow = FakeFlow(fulfillment_model(False), mixed=False)
+        path = 'checkout.fulfillment.pickupTab.pickup.storeLocator.address.stateCitySelectorForCheckout'
+        with self.assertRaisesRegex(ValueError, '指定提货城市'):
+            options.region_data(flow, path, {'state':'四川','city':'不存在'}, pickup_search=True)

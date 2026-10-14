@@ -31,6 +31,7 @@ const ACTIONS: &[&str] = &[
     "region",
     "import_auth",
     "forget_password",
+    "password_save",
     "qr",
 ];
 // A local workspace scope, never registered as an Apple account.
@@ -284,9 +285,9 @@ impl Engine {
     }
     pub async fn remove_account(&self, host: &TaskHost, id: &str) -> Result<(), String> {
         let _reservation = self.reserve_removal(id)?;
-        // Use the same OS vault as login; no Apple requests or credentials on stdout.
+        // Clear account-local credentials without accessing the OS keychain.
         let mut command = host.command()?;
-        command.arg("--forget-account").arg(id)
+        command.arg("--forget-account").arg(id).arg("--data-dir").arg(&self.root)
             .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
             .kill_on_drop(true);
         #[cfg(windows)] command.creation_flags(0x08000000);
@@ -294,7 +295,7 @@ impl Engine {
             .await.map_err(|_| "清理保存密码超时，账号尚未移除，请重试")?
             .map_err(|_| "无法启动凭据清理，账号尚未移除，请重试")?;
         if !status.success() {
-            return Err("无法清除系统保存的密码，账号尚未移除，请检查凭据保险库后重试".into());
+            return Err("无法清除本地保存的密码，账号尚未移除，请检查文件权限后重试".into());
         }
         self.finish_removal(id)
     }
@@ -735,6 +736,12 @@ pub fn apply_event(task: &mut Task, event: &Value) {
         }
         "stage" => {
             task.stage = event["message"].as_str().unwrap_or("执行中").into();
+            if task.logs.last() != Some(&task.stage) {
+                task.logs.push(task.stage.clone());
+                if task.logs.len() > 100 {
+                    task.logs.remove(0);
+                }
+            }
         }
         "log" => {
             task.logs.push(

@@ -63,11 +63,27 @@ const errorText = (e: unknown) =>
       ? e.message
       : "操作未完成，请重试。";
 
+function savedPurchase(accountId: string): Record<string, unknown> {
+  try {
+    const saved = JSON.parse(
+      localStorage.getItem("duo.purchase.v1." + accountId) || "{}",
+    );
+    return saved && typeof saved === "object" ? saved : {};
+  } catch {
+    return {};
+  }
+}
+
 export default function App() {
   const { format, setRevealed } = useAccountPrivacy();
   const [route, navigate] = useRoute();
   const [snapshot, setSnapshot] = useState(initial);
   const [ready, setReady] = useState(false);
+  const [clockNow, setClockNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setClockNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
   const [accountId, setAccountId] = useState("");
   const [enabledIds, setEnabledIds] = useState<string[]>([]);
   const [sessionReady, setSessionReady] = useState(false);
@@ -75,8 +91,48 @@ export default function App() {
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
   const [dispatching, setDispatching] = useState(false);
+  const [loadedPurchaseAccount, setLoadedPurchaseAccount] = useState("");
   const [sku, setSku] = useState("MK2U4CH");
-  const [quantity, setQuantity] = useState(2);
+  const [quantity, setQuantity] = useState(1);
+  const [fulfillmentMode, setFulfillmentMode] = useState<"HOME" | "RETAIL">(
+    "HOME",
+  );
+  const [pickupCity, setPickupCity] = useState("");
+  const [pickupStore, setPickupStore] = useState("");
+  const [autoSubmit, setAutoSubmit] = useState(true);
+  const [waitForRelease, setWaitForRelease] = useState(true);
+  const [fallbackConfigurations, setFallbackConfigurations] = useState(true);
+  useEffect(() => {
+    if (!accountId || loadedPurchaseAccount !== accountId) return;
+    try {
+      localStorage.setItem(
+        "duo.purchase.v1." + accountId,
+        JSON.stringify({
+          sku,
+          quantity,
+          mode: fulfillmentMode,
+          city: pickupCity,
+          store: pickupStore,
+          autoSubmit,
+          fallbackConfigurations,
+          waitForRelease,
+        }),
+      );
+    } catch {
+      /* Storage may be unavailable. */
+    }
+  }, [
+    accountId,
+    loadedPurchaseAccount,
+    sku,
+    quantity,
+    fulfillmentMode,
+    pickupCity,
+    pickupStore,
+    autoSubmit,
+    fallbackConfigurations,
+    waitForRelease,
+  ]);
   const [taskTarget, setTaskTarget] = useState<Task | null>(null);
   const [focusTaskId, setFocusTaskId] = useState("");
   const [removingAccount, setRemovingAccount] = useState<Account | null>(null);
@@ -143,8 +199,17 @@ export default function App() {
   const account = snapshot.accounts.find((a) => a.id === accountId);
   useLayoutEffect(() => setRevealed(false), [accountId, setRevealed]);
   useEffect(() => {
-    setSku(account?.preset_sku || "MK2U4CH");
-    setQuantity(account?.preset_quantity || 2);
+    if (!account) return;
+    const saved = savedPurchase(account.id);
+    setSku(String(saved.sku || account.preset_sku || "MK2U4CH"));
+    setQuantity(Number(saved.quantity) || account.preset_quantity || 1);
+    setFulfillmentMode(saved.mode === "RETAIL" ? "RETAIL" : "HOME");
+    setPickupCity(String(saved.city || ""));
+    setPickupStore(String(saved.store || ""));
+    setAutoSubmit(saved.autoSubmit !== false);
+    setFallbackConfigurations(saved.fallbackConfigurations !== false);
+    setWaitForRelease(saved.waitForRelease !== false);
+    setLoadedPurchaseAccount(account.id);
   }, [account?.id, account?.preset_sku, account?.preset_quantity]);
   const tasks = snapshot.tasks
     .filter((t) => t.account_id === accountId)
@@ -524,6 +589,18 @@ export default function App() {
                           再次要求验证时，才需输入验证码。首次登录会打开一个小型浏览器窗口。
                         </p>
                         <div className="button-row">
+                          <button
+                            disabled={busy}
+                            onClick={() => start("password_save")}
+                          >
+                            设置 / 修改本地密码
+                          </button>
+                          <button
+                            disabled={busy}
+                            onClick={() => start("forget_password")}
+                          >
+                            清除本地密码
+                          </button>
                           <button disabled={busy} onClick={() => start("me")}>
                             <RefreshCw size={15} />
                             检查登录
@@ -564,7 +641,20 @@ export default function App() {
                         <form
                           onSubmit={(e) => {
                             e.preventDefault();
-                            start("purchase", { sku, quantity });
+                            start("purchase", {
+                              sku,
+                              quantity,
+                              checkout_preferences: {
+                                mode: fulfillmentMode,
+                                city: pickupCity.trim(),
+                                store: pickupStore.trim(),
+                                auto_submit: autoSubmit,
+                                wait_for_release: waitForRelease,
+                                fallback_configurations:
+                                  fulfillmentMode === "RETAIL" &&
+                                  fallbackConfigurations,
+                              },
+                            });
                           }}
                         >
                           <ProductSelect sku={sku} onChange={setSku} />
@@ -594,14 +684,107 @@ export default function App() {
                               />
                             </label>
                           </div>
+                          <div className="buy-fields checkout-fields">
+                            <label>
+                              收货方式
+                              <select
+                                value={fulfillmentMode}
+                                onChange={(e) =>
+                                  setFulfillmentMode(
+                                    e.target.value as "HOME" | "RETAIL",
+                                  )
+                                }
+                              >
+                                <option value="RETAIL">门店自提</option>
+                                <option value="HOME">送货上门</option>
+                              </select>
+                            </label>
+                            <label>
+                              支付方式
+                              <input
+                                value="支付宝（默认）"
+                                readOnly
+                                aria-label="支付方式"
+                              />
+                            </label>
+                          </div>
+                          {fulfillmentMode === "RETAIL" && (
+                            <div className="buy-fields checkout-fields">
+                              <label>
+                                提货城市或地区
+                                <input
+                                  required
+                                  value={pickupCity}
+                                  onChange={(e) =>
+                                    setPickupCity(e.target.value)
+                                  }
+                                  placeholder="例如：上海"
+                                />
+                              </label>
+                              <label>
+                                指定提货门店
+                                <input
+                                  required={
+                                    autoSubmit || fallbackConfigurations
+                                  }
+                                  value={pickupStore}
+                                  onChange={(e) =>
+                                    setPickupStore(e.target.value)
+                                  }
+                                  placeholder="门店名称或编号；留空时结账中选择"
+                                />
+                              </label>
+                            </div>
+                          )}
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={waitForRelease}
+                              onChange={(e) =>
+                                setWaitForRelease(e.target.checked)
+                              }
+                            />
+                            等待上架 / 到货（每次查询结束后 2
+                            秒刷新，持续等待直到可购买或取消）
+                          </label>
+                          {fulfillmentMode === "RETAIL" && (
+                            <label>
+                              <input
+                                type="checkbox"
+                                checked={fallbackConfigurations}
+                                onChange={(e) =>
+                                  setFallbackConfigurations(e.target.checked)
+                                }
+                              />
+                              无货时自动换同机型配置（容量、颜色不限，允许更贵）
+                            </label>
+                          )}
+                          <label>
+                            <input
+                              type="checkbox"
+                              checked={autoSubmit}
+                              onChange={(e) => setAutoSubmit(e.target.checked)}
+                            />
+                            自动提交订单（默认）
+                          </label>
                           <p className="muted">
-                            购物袋已有该商品时，数量调整为这里填写的总数。结算前会显示全部商品与金额。
+                            自动使用已保存的提货人、最早可取时段和支付宝。自动模式仅提交指定
+                            SKU
+                            与数量，最终金额不得超过实际选定配置的核验金额；校验通过后不再弹出确认，完成后等待付款。购物袋其他商品会自动移除，仅保留本次目标商品并核对数量。开启换配置后，原
+                            SKU
+                            无货时优先同容量换色，再选其他容量；门店和数量不变，金额按替代配置重新核对。购买配置自动记住。
                           </p>
                           <div className="button-row">
                             <button
                               className="primary"
                               type="submit"
-                              disabled={busy || !sku.trim() || quantity < 1}
+                              disabled={
+                                busy ||
+                                !sku.trim() ||
+                                quantity < 1 ||
+                                (fulfillmentMode === "RETAIL" &&
+                                  !pickupCity.trim())
+                              }
                             >
                               立即下单
                               <ArrowRight size={16} />
@@ -737,7 +920,15 @@ export default function App() {
                         {active(task) && task.status !== "waiting" && (
                           <LoaderCircle size={13} className="spin" />
                         )}
-                        {stateNames[task.status]}
+                        {stateNames[task.status]} ·{" "}
+                        {Math.max(
+                          0,
+                          Math.floor(
+                            (active(task) ? clockNow / 1000 : task.updated_at) -
+                              task.created_at,
+                          ),
+                        )}{" "}
+                        秒
                       </span>
                     </div>
                     <p className="task-account">{format(account.email)}</p>
@@ -758,6 +949,15 @@ export default function App() {
                         >
                           {format(task.stage)}
                         </p>
+                        {task.logs.length > 0 && (
+                          <ol className="task-progress" aria-label="执行进度">
+                            {task.logs.slice(-8).map((entry, index) => (
+                              <li key={`${task.id}-${index}`}>
+                                {format(entry)}
+                              </li>
+                            ))}
+                          </ol>
+                        )}
                         {active(task) && (
                           <button
                             className="operation-cancel"
@@ -801,7 +1001,7 @@ export default function App() {
           </>
         )}
         <footer className="workspace-footer">
-          <span>DUO Killer · 0.1.0</span>
+          <span>DUO Killer · v12（等待加购修复）</span>
           <span>会话与地址按账号独立保存</span>
         </footer>
         {removingAccount && (
@@ -1003,6 +1203,13 @@ function Result({
           订单 {result.order_number || "请查询订单确认"}
           {result.amount_due && ` · ${result.amount_due}`}
         </p>
+        {result.configuration_changed && (
+          <p>
+            已自动换配置：{result.requested_sku} → {result.purchased_sku}
+            <br />
+            实际商品：{result.selected_configuration}
+          </p>
+        )}
         {result.qr_data ? (
           <img
             src={result.qr_data}
@@ -1077,7 +1284,7 @@ function PromptForm({
       : String(prompt.default ?? ""),
   );
   const [show, setShow] = useState(false);
-  const [remember, setRemember] = useState(false);
+  const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const submit = async (answer: unknown) => {
@@ -1200,7 +1407,7 @@ function PromptForm({
                 checked={remember}
                 onChange={(e) => setRemember(e.target.checked)}
               />
-              保存到系统凭据保险库
+              保存在本机文件（未加密，仅当前用户可读，不使用钥匙串）
             </label>
           )}
         </>

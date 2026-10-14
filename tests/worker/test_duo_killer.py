@@ -25,6 +25,22 @@ def response(data, status=200, url="https://secure9.www.apple.com.cn/shop/accoun
 
 
 class LoginTests(unittest.TestCase):
+    def test_only_explicit_safe_reads_retry_after_two_seconds(self):
+        session = requests.Session()
+        ok = response({})
+        ok.request = requests.Request('GET', ok.url).prepare()
+        with patch.object(session, 'request', side_effect=[requests.Timeout(), ok]) as request, \
+                patch('release_wait.time.sleep') as pause, \
+                patch.object(duo_killer, 'record_cookie_lifetimes'):
+            self.assertIs(duo_killer.request_get(session, '读取页面', ok.url, safe_retry=True), ok)
+        self.assertEqual(request.call_count, 2)
+        pause.assert_called_once_with(2)
+        with patch.object(session, 'request', side_effect=requests.Timeout()) as request, \
+                patch('release_wait.time.sleep') as pause, self.assertRaises(requests.Timeout):
+            duo_killer.request_get(session, '提交订单', ok.url, method='POST')
+        request.assert_called_once()
+        pause.assert_not_called()
+
     def test_login_requests_share_payment_transport_and_logging(self):
         client = AppleStoreLogin()
         with patch.object(client, "store_request", return_value=response({})) as store, \
@@ -1198,6 +1214,9 @@ class StrongLoginTests(unittest.TestCase):
 
 class PurchaseFlowTests(unittest.TestCase):
     def setUp(self):
+        clean = patch.object(duo_killer, "clean_purchase_cart")
+        self.clean_cart = clean.start()
+        self.addCleanup(clean.stop)
         refresh = patch.object(duo_killer, "ensure_strong_login", return_value=False)
         refresh.start()
         self.addCleanup(refresh.stop)

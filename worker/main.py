@@ -37,11 +37,13 @@ def main():
     if '--forget-account' in sys.argv[1:]:
         parser = argparse.ArgumentParser()
         parser.add_argument('--forget-account', required=True, type=uuid.UUID)
+        parser.add_argument('--data-dir')
         args = parser.parse_args()
         if args.forget_account.int == 0:
             parser.error('不能移除通用预设。')
-        from credentials import Vault
-        Vault().delete(str(args.forget_account))
+        if args.data_dir:
+            from credentials import LocalVault
+            LocalVault(Path(args.data_dir) / 'accounts' / str(args.forget_account)).delete(str(args.forget_account))
         return
     parser = argparse.ArgumentParser()
     parser.add_argument('--data-dir', required=True)

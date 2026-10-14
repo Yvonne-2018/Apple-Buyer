@@ -31,3 +31,29 @@ class Vault:
                 # Missing credentials are already cleared; real deletion failures must surface.
                 if self.get(account_id) is not None:
                     raise
+
+
+class LocalVault:
+    """Explicit local-file storage, not encrypted; never consult the OS vault."""
+    def __init__(self, account_dir):
+        from pathlib import Path
+        self.path = Path(account_dir) / 'local-password.json'
+
+    def get(self, account_id):
+        import json
+        if not self.path.exists():
+            return None
+        data = json.loads(self.path.read_text(encoding='utf-8'))
+        if data.get('account_id') != account_id or not isinstance(data.get('password'), str):
+            raise ValueError('本地密码文件不属于当前账号或格式错误，请重新设置。')
+        return data['password'] or None
+
+    def save(self, account_id, password):
+        from duo_killer import write_private_json
+        if not isinstance(password, str) or not password or len(password) > 4096:
+            raise ValueError('请输入有效密码。')
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        write_private_json(self.path, {'account_id': account_id, 'password': password})
+
+    def delete(self, account_id):
+        self.path.unlink(missing_ok=True)

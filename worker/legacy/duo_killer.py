@@ -14,6 +14,7 @@ import tempfile
 import unicodedata
 from contextlib import contextmanager, nullcontext
 from datetime import datetime
+from decimal import Decimal
 from email.utils import parsedate_to_datetime
 from http.cookiejar import Cookie
 from http.cookies import SimpleCookie
@@ -24,6 +25,7 @@ from threading import Event, Thread
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
+import release_wait
 import requests
 
 from alipay_qr import get_payment_qr
@@ -109,16 +111,24 @@ def waiting(label):
 
 
 def request_get(session, stage, url, method="GET", **kwargs):
+    safe_retry = kwargs.pop('safe_retry', False)
     interaction.report_stage(stage)
     requested_url = requests.Request(method, url, params=kwargs.get("params")).prepare().url
     log.info("[%s] 开始 %s %s", stage, method, safe_url(requested_url))
     started = perf_counter()
-    try:
-        with waiting(stage):
-            response = session.request(method, url, timeout=TIMEOUT, **kwargs)
-    except requests.RequestException as error:
-        log.error("[%s] %.2fs 网络异常：%s", stage, perf_counter() - started, type(error).__name__)
-        raise
+    for attempt in (release_wait.attempts(30) if safe_retry else range(1)):
+        try:
+            with waiting(stage):
+                response = session.request(method, url, timeout=TIMEOUT, **kwargs)
+        except requests.RequestException as error:
+            if not safe_retry or (attempt == 29 and not release_wait.enabled()):
+                log.error("[%s] %.2fs 网络异常：%s", stage, perf_counter() - started, type(error).__name__)
+                raise
+        else:
+            if not safe_retry or response.status_code not in (500, 502, 503, 504) or (attempt == 29 and not release_wait.enabled()):
+                break
+            response.close()
+        release_wait.pause(f'{stage}暂不可用，已重试 {attempt + 1} 次')
     for reply in [*response.history, response]:
         record_cookie_lifetimes(session, reply)
         request = reply.request
@@ -569,6 +579,17 @@ def cart_item(flow, part):
     return matches[0] if matches else (None, None)
 
 
+def confirmed_empty_cart(flow):
+    """An empty bag still contains component metadata on Apple's live page."""
+    items = flow.require('shoppingCart').get('items')
+    if not isinstance(items, dict) or any(key.startswith('item-') for key in items):
+        return False
+    if items == {}:
+        return True
+    count = field(items, 'd.bagCount')
+    return type(count) is int and count == 0
+
+
 def add_to_bag(part=PART, quantity=1, *, set_total=False, flow=None):
     part = normalize_sku(part)
     if type(quantity) is not int or quantity < 1:
@@ -587,11 +608,18 @@ def add_to_bag(part=PART, quantity=1, *, set_total=False, flow=None):
             target = quantity if set_total else before + quantity
             if item is None:
                 # 商品尚未入袋时只加一件，随后读取真实 item ID、数量限制和更新 action。
-                add_error = _add_one_to_bag(session, part)
-                flow.page(BASE_URL + "/shop/bag", "首次加购后购物袋")
-                item_id, item = cart_item(flow, part)
-                if item is None or int(field(item, "itemQuantity.d.quantity", 0)) != 1:
-                    raise ValueError(add_error + "首次加购未确认数量为一件，请先查袋，不要直接重复加购。")
+                while True:
+                    add_error = _add_one_to_bag(session, part)
+                    flow.page(BASE_URL + "/shop/bag", "首次加购后购物袋")
+                    item_id, item = cart_item(flow, part)
+                    if (item is None and release_wait.enabled()
+                            and isinstance(add_error, release_wait.AddRejected)
+                            and confirmed_empty_cart(flow)):
+                        release_wait.pause(str(add_error) + ' 已核对购物袋为空，等待商品可加购')
+                        continue
+                    if item is None or int(field(item, "itemQuantity.d.quantity", 0)) != 1:
+                        raise ValueError(add_error + "首次加购未确认数量为一件，请先查袋，不要直接重复加购。")
+                    break
             current = int(field(item, "itemQuantity.d.quantity"))
             maximum = field(item, "itemQuantity.d.maxQuantity")
             if maximum is not None and target > int(maximum):
@@ -621,8 +649,9 @@ def add_to_bag(part=PART, quantity=1, *, set_total=False, flow=None):
 def _add_one_to_bag(session, part):
     product_url = BASE_URL + "/shop/product/" + part
     session.headers.update({"Accept": "*/*", "Referer": product_url})
-    product_page = request_get(session, "商品页", product_url)
-    product_page.raise_for_status()
+    cached = session.__dict__.pop("_duo_ready_product", None)
+    product_page = (cached[1] if cached and cached[0] == part else
+                    release_wait.product_page(session, request_get, product_url, part))
     key = re.search(r'<meta\b[^>]*\bname=["\']globalnav-store-key["\'][^>]*\bcontent=["\']([^"\']+)',
                     product_page.text, re.I)
     if not key:
@@ -653,6 +682,8 @@ def _add_one_to_bag(session, part):
                  result.get("addedToBag"), code, result.get("bagQuantity"))
         if result.get("addedToBag") is not True:
             add_error = f"加购接口未确认成功（{code}）。"
+            if result.get("addedToBag") is False:
+                add_error = release_wait.AddRejected(add_error)
     except ValueError:
         add_error = "加购接口返回了无法识别的 JSON 响应。"
     except requests.RequestException as error:
@@ -726,7 +757,7 @@ class Checkout:
         # 显式处理跳转，商城令牌不会跟随跳转发送到支付平台。
         for _ in range(8):
             url = self.apple_url(url)
-            response = request_get(self.session, stage, url, allow_redirects=False,
+            response = request_get(self.session, stage, url, safe_retry=True, allow_redirects=False,
                                    headers={"Referer": self.url})
             response.raise_for_status()
             if response.is_redirect:
@@ -758,7 +789,7 @@ class Checkout:
         headers = {**self.headers, "Accept": "*/*", "Content-Type": "application/x-www-form-urlencoded",
                    "Origin": urlunsplit((*urlsplit(self.url)[:2], "", "", "")),
                    "Referer": self.url, "X-Requested-With": "Fetch"}
-        response = request_get(self.session, name, self.apple_url(url), method="POST",
+        response = request_get(self.session, name, self.apple_url(url), method="POST", safe_retry=name == 'search',
                                data=data or {}, headers=headers, allow_redirects=False)
         if response.status_code != 200:
             raise ValueError(f"{name} 返回 HTTP {response.status_code}，已停止。")
@@ -849,7 +880,14 @@ def order_price(value):
     return text
 
 
-def confirm_order(model):
+def yuan_amount(value):
+    text = order_price(value)
+    if re.search(r'USD|\$', text):
+        raise ValueError("自动下单只支持人民币金额。")
+    return Decimal(re.search(r'\d[\d,]*(?:\.\d{1,2})?', text)[0].replace(',', ''))
+
+
+def confirm_order(model, *, auto_limit=None, verified_store=None):
     review = field(model, "checkout.review", {})
     rows = []
     for item in model_item_nodes(review.get("fulfillmentReview", {})):
@@ -868,12 +906,18 @@ def confirm_order(model):
     print("\n".join(rows))
     details = field(model, "checkout.companionBar.orderDetails", {})
     store = field(details, "fulfillmentCompanionBar.pickupSummary.d.store_name")
+    store = store or verified_store
     if store:
         print("自提门店：" + order_text(store))
     delivery = field(details, "shippingCompanionBar.address.d.street")
     if delivery:
         print("送货地址：" + order_text(delivery))
     print(f"\n总支付：{total}")
+    if auto_limit is not None:
+        if yuan_amount(total) > auto_limit:
+            raise ValueError("复核金额超过开始结账时的商品金额，自动下单已停止。")
+        interaction.report_stage(f"商品、数量及金额自动复核通过：{total}，立即提交订单")
+        return
     if interaction.handler is not None:
         details = {"items": [{"name": order_text(field(item, "d.name") or field(item, "d.productName") or field(item, "d.sku")),
                               "sku": field(item, "d.sku"), "quantity": int(field(item, "itemQuantity.d.quantity")),
@@ -921,6 +965,15 @@ def finish_payment(flow):
         if urlsplit(flow.url).path == "/shop/checkout/interstitial":
             return payment_result(flow)
         if not field(flow.model, "spinner.a.checkStatus.url"):
+            # A completed status poll may redirect back to fulfillment after the
+            # selected pickup/delivery offer expires. Surface the live reason;
+            # never interpret this as permission to replay placeOrder.
+            errors = field(flow.model, "checkout.fulfillment.fulfillmentMessages.d.messages.errors", [])
+            if field(flow.model, "checkout.d.page") == "Fulfillment" and isinstance(errors, list):
+                reasons = [order_text(message) for message in errors if isinstance(message, str) and message.strip()]
+                if reasons:
+                    raise ValueError("Apple 将订单退回取货/配送选择：" + "；".join(reasons)[:700]
+                                     + " 未自动重新提交，请先查询订单确认结果。")
             raise ValueError("未取得订单处理状态，请运行 -o 查询订单。")
         if attempt:
             sleep(2)
@@ -943,6 +996,17 @@ def pay_bag(*, flow=None):
             expected = model_items(cart.get("items", {}))
             if not expected:
                 raise ValueError("购物袋为空，无法下单。")
+            preferences = getattr(interaction.handler, 'checkout_preferences', {}) or {}
+            auto_limit = None
+            if preferences.get('auto_submit') is True or preferences.get('fallback_configurations') is True:
+                target = getattr(flow, 'purchase_target', None)
+                if target is None or expected != [target]:
+                    raise ValueError("自动下单要求购物袋只有本次指定的 SKU 和数量；请先清理其他商品。")
+                if preferences.get('auto_submit') is True:
+                    auto_limit = sum(yuan_amount(field(item, 'd.totalPrice'))
+                                     for item in model_item_nodes(cart.get('items', {})))
+                    if getattr(flow, 'replacement_price_limit', None) is not None:
+                        auto_limit = min(auto_limit, flow.replacement_price_limit)
             data = {"shoppingCart.locationConsent.locationConsent": "false",
                     "shoppingCart.summary.promoCode.promoCode": field(cart, "summary.promoCode.d.promoCode", ""),
                     "shoppingCart.actions.fcscounter": "", "shoppingCart.actions.fcsdata": "",
@@ -966,18 +1030,27 @@ def pay_bag(*, flow=None):
             if not any(o.get("value") == "ALIPAY" for o in options):
                 raise ValueError("当前订单不支持支付宝。")
             data = {billing + ".selectBillingOption": "ALIPAY", billing + ".bankLookUp.selectBank": ""}
-            flow.action(billing, "selectBillingOptionAction", {**data, "checkout.locationConsent.locationConsent": "false"})
+            if auto_limit is not None:
+                interaction.report_stage('支付宝随订单复核一并提交，跳过单独选择请求')
+            elif field(flow.model, billing + '.d.selectBillingOption') != 'ALIPAY':
+                flow.action(billing, "selectBillingOptionAction", {**data, "checkout.locationConsent.locationConsent": "false"})
+            else:
+                interaction.report_stage('支付宝已选中，跳过重复选择请求')
             flow.action("checkout.billing", "continueFromBillingToReview", data)
             review = flow.require("checkout.review")
             if (field(review, "placeOrder.d.enableContinue") is not True or
                     field(review, "billingReview.alipayReview.d.alipayLabel") != "ALIPAY" or
                     model_items(review.get("fulfillmentReview", {})) != expected):
                 raise ValueError("订单复核未通过：商品、数量、支付方式或下单状态不符合预期。")
-            confirm_order(flow.model)
+            verified_store = getattr(flow, 'verified_pickup_store', None)
+            if auto_limit is not None and preferences.get('mode') == 'RETAIL' and not verified_store:
+                raise ValueError('自动下单尚未验证指定门店，已停止。')
+            confirm_order(flow.model, auto_limit=auto_limit, verified_store=verified_store)
             save_auth(session)
             interaction.report_stage("正在提交订单", order_submitted=True)
             flow.action("checkout.review.placeOrder", "continueFromReviewToProcess")
             result = finish_payment(flow)
+            interaction.report_stage('订单已创建，等待付款：' + str(result.get('order_number') or '') + '；正在获取二维码')
             if PAYMENT_ROOT is not None:
                 # Keep the issued payment link even if fetching its QR image is interrupted.
                 write_private_json(PAYMENT_ROOT / "payment.json", result)
@@ -989,6 +1062,96 @@ def pay_bag(*, flow=None):
                 save_auth(session)
 
 
+def pay_with_alternatives(flow, requested, quantity):
+    from variant_fallback import PickupUnavailable, fetch_variants, choose_available, replace_cart
+    preferences = getattr(interaction.handler, 'checkout_preferences', {}) or {}
+    if not preferences.get('fallback_configurations'):
+        return pay_bag(flow=flow)
+    candidates, attempted, current, replacement = None, set(), requested, None
+    for _ in release_wait.attempts(64):
+        try:
+            result = pay_bag(flow=flow)
+            if replacement:
+                result.update(requested_sku=requested, purchased_sku=current,
+                              selected_configuration=replacement['name'], configuration_changed=(current != requested))
+            return result
+        except PickupUnavailable as error:
+            attempted.add(current)
+            interaction.report_stage(f'{current} 在 {error.store_id} 不可取货，正在查找同机型其他配置')
+            if candidates is None:
+                candidates = fetch_variants(request_get, requested)
+            replacement = None
+            for attempt in release_wait.attempts(30):
+                replacement = choose_available(flow.session, request_get, candidates, error.store_id, attempted)
+                if replacement:
+                    break
+                if release_wait.enabled():
+                    release_wait.pause('同机型暂无可取配置，等待门店库存更新')
+                    attempted.clear()
+                    candidates = fetch_variants(request_get, requested)
+                elif not any(row['sku'] not in attempted for row in candidates):
+                    break
+                elif attempt < 29:
+                    release_wait.pause(f'同机型暂无其他可取配置，已刷新 {attempt + 1} 次')
+            if replacement is None:
+                raise ValueError('指定门店没有可确认的同机型替代配置，已停止，未提交订单。') from None
+            interaction.report_stage(f"自动换配置：{current} → {replacement['sku']}；"
+                                     f"{replacement['name']} × {quantity}，参考总价 RMB {Decimal(replacement['price']) * quantity}")
+            if current != replacement['sku']:
+                replace_cart(flow, current, replacement['sku'], quantity)
+            current = replacement['sku']
+            flow.purchase_target = (current, quantity)
+            flow.replacement_price_limit = Decimal(replacement['price']) * quantity
+            flow.verified_pickup_store = None
+            # Pin the ID resolved by the actual checkout; never migrate to a nearby store.
+            preferences['store'] = error.store_id
+    raise ValueError('可尝试配置已耗尽，未提交订单。')
+
+
+def clean_purchase_cart(flow, part):
+    """Keep the requested SKU; remove other bag rows before changing quantity."""
+    def rows():
+        items = flow.require('shoppingCart').get('items')
+        if not isinstance(items, dict):
+            raise ValueError('购物袋结构不完整，未自动清理。')
+        result = [(key, item) for key, item in items.items() if key.startswith('item-')]
+        if any(not field(item, 'd.sku') for _, item in result):
+            raise ValueError('购物袋存在无法识别的商品，未自动清理。')
+        return result
+    original = rows()
+    targets = [(key, item) for key, item in original if str(field(item, 'd.sku')).upper() == part]
+    if len(targets) > 1:
+        raise ValueError('目标 SKU 有多个配置商品行，未自动清理，请确认购物袋。')
+    original_target = model_items({key: item for key, item in targets})
+    extras = [(key, item) for key, item in original if str(field(item, 'd.sku')).upper() != part]
+    # Validate every deletion action before making the first change.
+    if any(not field(item, 'a.delete.url') for _, item in extras):
+        raise ValueError('购物袋其他商品缺少移除入口，未自动清理。')
+    for key, item in extras:
+        current = dict(rows())
+        if key not in current:
+            continue
+        if field(current[key], 'd.sku') != field(item, 'd.sku'):
+            raise ValueError('购物袋商品发生变化，已停止清理。')
+        interaction.report_stage('自动清理购物袋其他商品：' + str(field(item, 'd.sku')))
+        try:
+            flow.action('shoppingCart.items.' + key, 'delete')
+        except (requests.RequestException, ValueError):
+            # Check actual state instead of repeating an uncertain deletion.
+            pass
+        flow.page(BASE_URL + '/shop/bag', '清理后核对购物袋')
+        remaining = dict(rows())
+        if key in remaining:
+            raise ValueError('其他商品移除未确认，已停止；未重复发送清理请求。')
+        target_now = {k: v for k, v in remaining.items() if str(field(v, 'd.sku')).upper() == part}
+        if model_items(target_now) != original_target:
+            raise ValueError('清理期间目标商品或数量发生变化，已停止。')
+    if any(str(field(item, 'd.sku')).upper() != part for _, item in rows()):
+        raise ValueError('清理期间购物袋新增了其他商品，已停止，请关闭其他购物操作。')
+    if extras:
+        interaction.report_stage('其他商品已清理，继续核对目标 SKU 和数量')
+
+
 def purchase_sku(part, sms=False, quantity=1):
     part = normalize_sku(part)
     if type(quantity) is not int or quantity < 1:
@@ -996,6 +1159,9 @@ def purchase_sku(part, sms=False, quantity=1):
     ensure_auth_file()
     with requests.Session() as session:
         load_auth(session, json.loads(AUTH_PATH.read_text(encoding="utf-8")))
+        if release_wait.enabled():
+            page = release_wait.product_page(session, request_get, BASE_URL + "/shop/product/" + part, part)
+            session._duo_ready_product = (part, page)
         refreshed = ensure_strong_login(session, sms=sms)
         try:
             flow = Checkout(session)
@@ -1016,8 +1182,10 @@ def purchase_sku(part, sms=False, quantity=1):
             else:
                 print("商城已登录。")
             print(f"目标购买数量：{part} × {quantity}")
+            clean_purchase_cart(flow, part)
             add_to_bag(part, quantity=quantity, set_total=True, flow=flow)
-            return pay_bag(flow=flow)
+            flow.purchase_target = (part, quantity)
+            return pay_with_alternatives(flow, part, quantity)
         finally:
             save_auth(session)
 

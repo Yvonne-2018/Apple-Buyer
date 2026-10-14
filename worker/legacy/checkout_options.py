@@ -7,6 +7,7 @@ import tempfile
 
 import requests
 import interaction
+import release_wait
 
 
 def value(node, path, default=None):
@@ -15,6 +16,12 @@ def value(node, path, default=None):
             return default
         node = node[key]
     return node
+
+
+def store_key(name):
+    """Match the retail page's optional Apple prefix without changing the store identity."""
+    name = re.sub(r'^apple\s+', '', str(name).strip(), flags=re.IGNORECASE)
+    return re.sub(r'\s+', '', name).casefold()
 
 
 def read_config(path):
@@ -128,6 +135,7 @@ def configure_address(path, auth_path=None):
     # 主动配置时每一项均可修改；结账时只补充缺项。
     old = config.get('contact', {})
     config['contact'] = {
+        **old,
         'lastName': ask('收件/取货人姓氏', old.get('lastName', '')),
         'firstName': ask('名字', old.get('firstName', '')),
         'emailAddress': ask('通知邮箱', old.get('emailAddress', ''), r'[^\s@]+@[^\s@]+\.[^\s@]+'),
@@ -158,7 +166,7 @@ def configure_address(path, auth_path=None):
     return {'success': True, 'config_file': str(path)}
 
 
-def region_data(flow, path, wanted=None, *, prefer_current=False):
+def region_data(flow, path, wanted=None, *, prefer_current=False, pickup_search=False):
     wanted = wanted or {}
     if prefer_current:
         current = flow.require(path)['d']
@@ -169,6 +177,9 @@ def region_data(flow, path, wanted=None, *, prefer_current=False):
         node = flow.require(path)
         data = node['d']
         options = [(o['value'], o.get('label', o['value'])) for o in data.get(key + 'Options', []) if o.get('value')]
+        # Municipalities return a fixed city and districts, with no city dropdown.
+        if key == 'city' and not options and data.get(key):
+            options = [(data[key], data[key])]
         desired = wanted.get(key) or data.get(key)
         matches = list(dict.fromkeys(k for k, title in options if desired in (k, title)))
         if not matches and desired:
@@ -178,11 +189,19 @@ def region_data(flow, path, wanted=None, *, prefer_current=False):
             matches = list(dict.fromkeys(k for k, title in options
                                         if normalized in (re.sub(suffix, '', str(k).strip()),
                                                           re.sub(suffix, '', str(title).strip()))))
+        if pickup_search and wanted.get(key) and len(matches) != 1:
+            raise ValueError('指定提货' + label + '“' + str(wanted[key]) + '”无法匹配官网选项。')
         if len(matches) == 1 and matches[0] != desired:
             print(f'{label}自动匹配：{desired} → {matches[0]}')
-        elif len(matches) != 1 and desired:
+        elif (len(matches) != 1 and desired
+              and not (pickup_search and key == 'district' and not wanted.get('district') and options)):
             print(f'配置中的{label}“{desired}”无法唯一匹配官网选项，请确认。')
-        chosen = matches[0] if len(matches) == 1 else choose(label, options, data.get(key))
+        if (pickup_search and key == 'district' and not wanted.get('district')
+                and len(matches) != 1 and options):
+            chosen = options[0][0]
+            interaction.report_stage('门店查询使用官网有效区县：' + str(chosen) + '；最终仍匹配指定门店')
+        else:
+            chosen = matches[0] if len(matches) == 1 else choose(label, options, data.get(key))
         selected[key] = chosen
         payload = {path + '.' + k: data.get(k, '') for k in ('state', 'city', 'district', 'provinceCityDistrict')}
         payload.update({path + '.' + k: v for k, v in selected.items()})
@@ -194,7 +213,9 @@ def region_data(flow, path, wanted=None, *, prefer_current=False):
             payload[path + '.provinceCityDistrict'] = ''
             flow.action(path, 'Select' + key, payload)
     return {**{path + '.' + key: val for key, val in selected.items()},
-            path + '.countryCode': 'CN', path + '.provinceCityDistrict': ' '.join(selected.values())}
+            path + '.countryCode': 'CN', path + '.provinceCityDistrict': ' '.join(
+                v for i, v in enumerate(selected.values())
+                if i == 0 or v != list(selected.values())[i - 1])}
 
 
 def shipping_options(flow, groups_path):
@@ -237,9 +258,18 @@ def pickup_contact(flow, config, config_path):
     flow.require(address)
     payload = verification(flow, address)
     details = contact(config)
-    config['contact'] = details
-    save_config(config_path, config)
     payload.update({address + '.' + key: val for key, val in details.items()})
+    identity_path = path + '.selfPickupContact.nationalIdSelf'
+    identity = value(flow.model, identity_path + '.d', {})
+    if identity.get('enabled') is True:
+        last_four = config.get('contact', {}).get('nationalIdLast4') or identity.get('nationalIdSelf', '')
+        if not isinstance(last_four, str) or not re.fullmatch(r'[A-Za-z0-9]{4}', last_four):
+            last_four = ask('提货人身份证件号码后四位（无需完整号码）', pattern=r'[A-Za-z0-9]{4}')
+        last_four = last_four.upper()
+        payload[identity_path + '.nationalIdSelf'] = last_four
+        details['nationalIdLast4'] = last_four
+    config['contact'] = {**config.get('contact', {}), **details}
+    save_config(config_path, config)
     payload.update(invoice_data(flow, path))
     actions = flow.require(path).get('a', {})
     action = next((a for a in ('continueFromPickupContactToShipping', 'continueFromPickupContactToBilling') if a in actions), None)
@@ -269,11 +299,15 @@ def home_delivery(flow, config):
 
 def fulfillment(flow, config_path):
     config = read_config(config_path)
+    preferences = getattr(interaction.handler, 'checkout_preferences', {}) or {}
     path = 'checkout.fulfillment'
     node = flow.require(path + '.fulfillmentOptions')['d']
     options = [(o['value'], o.get('title', o['value'])) for o in node.get('options', [])
                if o.get('value') in ('HOME', 'RETAIL') and not o.get('disabled')]
-    mode = choose('收货方式', options, 'HOME')
+    preferred_mode = preferences.get('mode')
+    if preferred_mode and preferred_mode not in [key for key, _ in options]:
+        raise ValueError('当前订单不支持预设的收货方式，已停止。')
+    mode = preferred_mode or choose('收货方式', options, 'HOME')
     if mode != node.get('selectFulfillmentLocation'):
         flow.action(path + '.fulfillmentOptions', 'selectFulfillmentLocationAction',
                     {path + '.fulfillmentOptions.selectFulfillmentLocation': mode})
@@ -283,13 +317,51 @@ def fulfillment(flow, config_path):
         return
     locator = path + '.pickupTab.pickup.storeLocator'
     node = flow.require(locator)
-    search = ask('自提门店所在城市/地区', value(node, 'd.searchInput', '') or config.get('delivery', {}).get('city', ''))
-    region = locator + '.address.stateCitySelectorForCheckout'
-    store_data = {locator + '.showAllStores': 'false', locator + '.selectStore': '', locator + '.searchInput': search}
-    store_data.update({region + '.' + k: value(flow.model, region + '.d.' + k, '')
-                      for k in ('state', 'city', 'district', 'provinceCityDistrict', 'countryCode')})
-    flow.action(locator, 'search', store_data)
-    stores = value(flow.model, locator + '.searchResults.d.retailStores', [])
+    search = preferences.get('city') or ask('自提门店所在城市/地区', value(node, 'd.searchInput', '') or config.get('delivery', {}).get('city', ''))
+    store_data = pickup_search_data(flow, locator, search, config.get('delivery', {}))
+    wanted_store = preferences.get('store', '').strip()
+    wanted_key = store_key(wanted_store)
+    search_errors = 0
+    for attempt in (release_wait.attempts(30) if wanted_store else range(3)):
+        current_results = value(flow.model, locator + '.searchResults.d.retailStores', [])
+        reuse = (attempt == 0 and wanted_store
+                 and value(flow.model, locator + '.d.searchInput') == store_data[locator + '.searchInput']
+                 and isinstance(current_results, list)
+                 and len([s for s in current_results if (preferences.get('fallback_configurations') or not s.get('storeDisabled')) and wanted_key in
+                          (store_key(s.get('storeId', '')), store_key(s.get('storeName', '')))]) == 1)
+        if reuse:
+            interaction.report_stage('复用本次结账返回的可选门店，跳过重复搜索')
+        else:
+            flow.action(locator, 'search', store_data)
+        result = value(flow.model, locator + '.searchResults.d', {})
+        stores = result.get('retailStores') if isinstance(result, dict) else None
+        if not isinstance(stores, list):
+            if value(flow.model, locator + '.d.isStoreSearchErrorPresent') is True:
+                search_errors += 1
+                if search_errors >= 3 and not release_wait.enabled():
+                    raise ValueError('Apple 连续未返回可选门店列表；已停止。'
+                                     '当前商品可能无法在该地区取货，也可能是门店搜索失败。'
+                                     '请以官网对该商品和门店显示的取货状态为准。')
+                release_wait.pause(f'Apple 门店搜索返回错误，已重试 {search_errors} 次')
+                continue
+            raise ValueError('Apple 门店搜索响应缺少门店列表，可能是接口格式已变化；已停止。')
+        named = [store for store in stores if wanted_key in
+                 (store_key(store.get('storeId', '')), store_key(store.get('storeName', '')))] if wanted_store else []
+        matches = [store for store in named if not store.get('storeDisabled')]
+        if attempt == 0:
+            print('门店查询地区：' + store_data[locator + '.searchInput'])
+            print('Apple 返回门店：' + ('、'.join(
+                f'{store.get("storeName", "未知")}（{store.get("storeId", "未知")}，'
+                + ('当前不可取货' if store.get('storeDisabled') else '可选') + '）'
+                for store in stores) or '无'))
+        if (preferences.get('fallback_configurations') and len(named) == 1
+                and named[0].get('storeDisabled') is True):
+            from variant_fallback import PickupUnavailable
+            raise PickupUnavailable(str(named[0]['storeId']))
+        if not wanted_store or len(matches) == 1:
+            break
+        if release_wait.enabled() or attempt < 29:
+            release_wait.pause(f'预设门店尚不可选，已刷新 {attempt + 1} 次')
     choices = []
     for store in stores:
         lines = value(store, 'availability.lineItemAvailability', [])
@@ -306,24 +378,191 @@ def fulfillment(flow, config_path):
         choices.append(('HOME', '为我送货（不选门店，改为配送）'))
         if no_stores:
             print('当前没有可选自提门店，可以改为送货。')
-    selected = choose('选择自提门店或改为送货（取货状态由官网返回）', choices,
-                      'HOME' if no_stores and delivery_available else None)
+    if wanted_store:
+        if len(matches) != 1:
+            if len(named) == 1 and named[0].get('storeDisabled'):
+                raise ValueError(f'门店“{named[0].get("storeName", wanted_store)}”存在，但当前商品暂不可在该店自提。')
+            if len(named) > 1:
+                raise ValueError('预设门店名称对应多个门店，请填写具体门店编号。')
+            available_names = '、'.join(str(store.get('storeName', '')) for store in stores[:8])
+            raise ValueError(f'当前城市的门店搜索结果未找到“{wanted_store}”'
+                             + (f'；返回的门店：{available_names}' if available_names else '；当前没有返回门店')
+                             + '。请核对城市，或留空门店后在结账时选择。')
+        selected = str(matches[0]['storeId'])
+    else:
+        selected = choose('选择自提门店或改为送货（取货状态由官网返回）', choices,
+                          'HOME' if no_stores and delivery_available else None)
     if selected == 'HOME':
         home_delivery(flow, config)
         return
     store_data[locator + '.selectStore'] = selected
-    flow.action(locator, 'select', store_data)
+    # Only reuse a selection and signed slots received in this checkout, never a disk cache.
+    time_data = None
+    slot_path = path + '.pickupTab.pickup.timeSlot'
+    if (value(flow.model, locator + '.d.selectStore') == selected
+            and value(flow.model, slot_path + '.d.storeId') == selected
+            and value(flow.model, slot_path + '.d.enableTimeSlotWindows') is True):
+        try:
+            time_data = pickup_time_data(flow, selected)
+        except ValueError:
+            pass  # Refresh selection if its slot data is incomplete or no longer usable.
+    if time_data is None:
+        flow.action(locator, 'select', store_data)
+    else:
+        interaction.report_stage('官网已选中指定门店且返回有效时段，跳过重复选店请求')
     if value(flow.model, locator + '.d.selectStore') != selected:
         raise ValueError('服务端未确认所选自提门店，已停止。')
+    flow.verified_pickup_store = selected
+    interaction.report_stage(f'已选中自提门店：{selected}，正在确认取货时间')
     payload.update(store_data)
+    payload.update(pickup_time_data(flow, selected) if time_data is None else time_data)
     forced = path + '.pickupTab.deliveryForced'
     if value(flow.model, forced + '.shipmentGroups'):
+        if preferences.get('auto_submit'):
+            raise ValueError('指定自提的订单包含必须配送的商品，自动下单已停止。')
         print('此订单包含必须配送的商品，继续配置送货地区和配送服务。')
         payload.update(region_data(flow, forced + '.deliveryLocation.address.provinceCityDistrictTabsForCheckout', config.get('delivery'), prefer_current=True))
         payload.update(shipping_options(flow, forced + '.shipmentGroups'))
     flow.action(path, 'continueFromFulfillmentToPickupContact', payload)
+    if not isinstance(value(flow.model, 'checkout.pickupContact'), dict):
+        raise ValueError('门店已选中，但 Apple 未接受取货安排，未进入联系人页；'
+                         '请检查取货日期、时段是否仍可用。未提交订单。')
     flow.require('checkout.pickupContact')
     pickup_contact(flow, config, config_path)
+
+
+def pickup_time_data(flow, store_id):
+    path = 'checkout.fulfillment.pickupTab.pickup.timeSlot'
+    node = value(flow.model, path, {})
+    if value(node, 'd.enableTimeSlotWindows') is not True:
+        return {}
+    if str(value(node, 'd.storeId', '')) != store_id:
+        raise ValueError('取货时段所属门店与所选门店不一致，已停止。')
+    path += '.dateTimeSlots'
+    data = flow.require(path).get('d', {})
+    dates, windows = data.get('pickUpDates', []), data.get('timeSlotWindows', [])
+    if not isinstance(dates, list) or not isinstance(windows, list):
+        raise ValueError('Apple 取货时段格式无法识别，已停止。')
+    available = []
+    for day in dates:
+        day_id = str(day.get('dayOfMonth', ''))
+        slots = [slot for group in windows if isinstance(group, dict)
+                 for slot in (group.get(day_id) or []) if isinstance(slot, dict)
+                 and slot.get('timeSlotValue') and slot.get('SlotId') and slot.get('signKey')
+                 and not slot.get('disabled') and slot.get('enabled') is not False
+                 and not slot.get('isRestricted')]
+        if day.get('date') and slots:
+            available.append((day, slots))
+    if not available:
+        raise ValueError('门店已选中，但当前没有可用取货签到时段；未提交订单，请稍后重试。')
+    day, slots = min(available, key=lambda entry: entry[0]['date'])
+    def start_time(slot):
+        match = re.match(r'^\d{1,2}-(\d{1,2}):(\d{2})-', slot['timeSlotValue'])
+        if not match:
+            raise ValueError('Apple 返回的取货时段无法比较先后，已停止。')
+        return tuple(map(int, match.groups()))
+    slot = min(slots, key=start_time)
+    selected_date, selected_slot = day['date'], slot['timeSlotValue']
+    # 与官网日期/时段控件 onChange 写入的字段一致，签名值仅来自当前门店实时响应。
+    fields = {'dayRadio': str(day['dayOfMonth']), 'date': day['date'],
+              'timeSlotValue': slot['timeSlotValue'], 'timeSlotId': slot['SlotId'],
+              'startTime': slot.get('checkInStart', ''), 'endTime': slot.get('checkInEnd', ''),
+              'signKey': slot['signKey'], 'timeZone': slot.get('timeZone', ''),
+              'displayStartTime': slot.get('displayStart', ''), 'displayEndTime': slot.get('displayEnd', ''),
+              'timeSlotType': slot.get('timeSlotType') or '',
+              'isRecommended': 'true' if slot.get('recommendationLabel') else 'false',
+              'isRestricted': slot.get('isRestricted') or ''}
+    interaction.report_stage(f'自动选择最早取货时间：{selected_date} {slot.get("Label", selected_slot)}')
+    return {path + '.' + key: val for key, val in fields.items()}
+
+
+def region_name(name):
+    return re.sub(r'[省市]$', '', str(name).strip())
+
+
+def retail_city_states(document, city):
+    """Read only store addresses from Apple's public retail directory."""
+    match = re.search(r'<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>', document, re.S)
+    if not match:
+        raise ValueError('官网门店目录缺少地区数据，请稍后重试。')
+    states = set()
+    def visit(node):
+        if isinstance(node, dict):
+            address = node.get('address')
+            if (node.get('__typename') == 'RgdsStore' and isinstance(address, dict)
+                    and region_name(address.get('city', '')) == region_name(city)
+                    and address.get('stateName')):
+                states.add(address['stateName'])
+            for child in node.values():
+                visit(child)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child)
+    visit(json.loads(match[1]))
+    return states
+
+
+def pickup_state(flow, current, city):
+    """Resolve the requested city, never reuse another city's province blindly."""
+    options = current.get('stateOptions', [])
+    direct = {o['value'] for o in options if o.get('value') and
+              region_name(city) in (region_name(o['value']), region_name(o.get('label', '')))}
+    if len(direct) == 1:
+        return direct.pop()  # Municipalities such as Shanghai need no directory request.
+    if current.get('state') and any(region_name(city) in
+            (region_name(o.get('value', '')), region_name(o.get('label', '')))
+            for o in current.get('cityOptions', []) if o.get('value')):
+        return current['state']
+    from duo_killer import request_get
+    response = request_get(flow.session, '查询提货城市所属省份',
+                           'https://www.apple.com.cn/retail/storelist/', safe_retry=True)
+    response.raise_for_status()
+    states = retail_city_states(response.text, city)
+    matches = {o['value'] for o in options if o.get('value') and any(
+        region_name(state) in (region_name(o['value']), region_name(o.get('label', '')))
+        for state in states)}
+    if len(matches) != 1:
+        raise ValueError('无法从官网门店目录唯一确定提货城市“' + str(city) + '”所属省份，请检查城市名称。')
+    return matches.pop()
+
+
+def pickup_search_data(flow, locator, search, saved_region):
+    """中国官网用完整省市区搜索，城市输入不能覆盖成单独的 searchInput。"""
+    region = locator + '.address.stateCitySelectorForCheckout'
+    current = value(flow.model, region + '.d')
+    data = {locator + '.showAllStores': 'false', locator + '.selectStore': ''}
+    if not isinstance(current, dict):
+        data[locator + '.searchInput'] = search
+        return data  # 兼容使用自由文本搜索、没有中国地区选择器的页面。
+    normalize = lambda name: re.sub(r'[省市]$', '', str(name).strip())
+    full_region = current.get('provinceCityDistrict') or ' '.join(
+        str(current.get(k, '')) for k in ('state', 'city', 'district')).strip()
+    complete = all(current.get(k) for k in ('state', 'city', 'district'))
+    if complete and (normalize(search) == normalize(current.get('city', '')) or search == full_region):
+        data.update({region + '.' + k: current.get(k, '')
+                     for k in ('state', 'city', 'district', 'countryCode')})
+        data[region + '.provinceCityDistrict'] = full_region
+    else:
+        wanted = dict(saved_region) if normalize(search) == normalize(saved_region.get('city', '')) else {}
+        wanted['city'] = search
+        if not wanted.get('state'):
+            wanted['state'] = pickup_state(flow, current, search)
+        data.update(region_data(flow, region, wanted, pickup_search=True))
+    # 官网 checkout.js 在地区选择结束后将 provinceCityDistrict 复制到 searchInput。
+    data[locator + '.searchInput'] = data[region + '.provinceCityDistrict']
+    return data
+
+
+def should_submit_contact(node, key, proposed):
+    rule = value(node, 'b.' + key + '.submit')
+    if rule is True:
+        return True
+    if rule is None or rule is False:
+        return False
+    # Interpret only the exact changed-value rule observed in Apple's model.
+    if rule == {'op': '!EQ', 'args': [{'val': '_'}, {'get': 'd.was.' + key}]}:
+        return proposed != value(node, 'd.was.' + key, '')
+    raise ValueError('官网联系人提交规则无法识别，已停止。')
 
 
 def shipping(flow, config_path, auth_path=None):
@@ -344,6 +583,13 @@ def shipping(flow, config_path, auth_path=None):
         current = saved[0]
     can_add = any(a.get('value') == 'newAddr' and not a.get('disabled')
                   for a in selector.get('radioAddresses', []))
+    # The current CN checkout renders the new-address form directly when there
+    # are no saved addresses; radioAddresses is absent in that layout.
+    if ('radioAddresses' not in selector and selector.get('selectAddress') == 'newAddr'
+            and isinstance(value(node, 'addressSelector.newAddress.address'), dict)
+            and value(node, 'addressSelector.newAddress.p.active') is not False
+            and value(node, 'addressSelector.newAddress.p.visible') is not False):
+        can_add = True
     if saved:
         choices = [('saved', '使用官网已有的地址')]
         if can_add:
@@ -371,7 +617,7 @@ def shipping(flow, config_path, auth_path=None):
                 configure_address(config_path, auth_path)
             config = read_config(config_path)
         details = contact(config)
-        config['contact'] = details
+        config['contact'] = {**config.get('contact', {}), **details}
         save_config(config_path, config)
         address = path + '.addressSelector.newAddress.address'
         flow.require(address)
@@ -389,16 +635,28 @@ def shipping(flow, config_path, auth_path=None):
     if value(flow.model, path + '.addressNotification.address') is not None:
         optional = value(flow.model, path + '.addressNotification.address.b.emailAddress.optional') is True
         payload[path + '.addressNotification.address.emailAddress'] = email if email or optional else ask('通知邮箱', pattern=r'[^\s@]+@[^\s@]+\.[^\s@]+')
+    email_path = path + '.addressContactEmail.address'
+    email_node = value(flow.model, email_path)
+    if email_node:
+        contact_email = details.get('emailAddress') or value(email_node, 'd.emailAddress', '')
+        if should_submit_contact(email_node, 'emailAddress', contact_email):
+            if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', contact_email) or '*' in contact_email:
+                contact_email = ask('收货联系邮箱', pattern=r'[^\s@]+@[^\s@]+\.[^\s@]+')
+            payload[email_path + '.emailAddress'] = contact_email
     phone_path = path + '.addressContactPhone.address'
     phone = value(flow.model, phone_path)
     if phone:
         payload.update(verification(flow, phone_path))
-        if value(phone, 'b.mobilePhone.submit') is True:
-            number = (details.get('fullDaytimePhone') if selected == 'newAddr' else value(phone, 'd.mobilePhone', '')) or ''
+        number = (details.get('fullDaytimePhone') if selected == 'newAddr' else value(phone, 'd.mobilePhone', '')) or ''
+        if should_submit_contact(phone, 'mobilePhone', number):
             if not re.fullmatch(r'\d{11,12}', number):
                 number = ask('收货手机号码', pattern=r'\d{11,12}')
             payload[phone_path + '.mobilePhone'] = number
-    flow.action(path, 'continueFromShippingToBilling', payload)
+    actions = flow.require(path).get('a', {})
+    continuation = [name for name in ('continueFromShippingToBilling', 'continueFromShippingToUnknown') if name in actions]
+    if len(continuation) != 1:
+        raise ValueError('官网未提供唯一可识别的收货地址继续入口，已停止。')
+    flow.action(path, continuation[0], payload)
     if value(flow.model, 'checkout.d.page') != 'Billing':
         raise ValueError('收货地址或联系方式未通过服务端校验，请检查后重试；未提交订单。')
     flow.require('checkout.billing')

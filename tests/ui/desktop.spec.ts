@@ -100,7 +100,7 @@ async function fixture(
             logs: [],
           };
           tasks.unshift(task);
-          root.started.push({ accountId, action, id });
+          root.started.push({ accountId, action, id, params });
           if (
             action === "login" ||
             action === "enroll" ||
@@ -411,6 +411,29 @@ test("order confirmation is explicit and can be rejected", async ({ page }) => {
   expect((await page.evaluate(() => (window as any).sent))[0].value).toBe(
     false,
   );
+});
+
+test("pickup preferences and Alipay default are shown before purchase", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.goto("/");
+  await enterWorkspace(page);
+  await page.getByLabel("收货方式").selectOption("RETAIL");
+  await page.getByLabel("提货城市或地区").fill("上海");
+  await page.getByLabel("指定提货门店").fill("上海环贸 iapm");
+  await expect(page.getByLabel("支付方式")).toHaveValue("支付宝（默认）");
+  await page.getByRole("button", { name: "立即下单" }).click();
+  const started = await page.evaluate(() => (window as any).started.at(-1));
+  expect(started.action).toBe("purchase");
+  expect(started.params.checkout_preferences).toEqual({
+    mode: "RETAIL",
+    city: "上海",
+    store: "上海环贸 iapm",
+    auto_submit: true,
+    fallback_configurations: true,
+    wait_for_release: true,
+  });
 });
 
 test("orders use a table and workspace fits minimum window width", async ({
@@ -1110,13 +1133,13 @@ test("removal failure keeps account and allows retry; the last removal returns t
   await fixture(page);
   await page.goto("/");
   await page.evaluate(() => {
-    (window as any).removeError = "无法清除系统保存的密码";
+    (window as any).removeError = "无法清除本地保存的密码";
   });
   await page.getByRole("button", { name: /移除 日常账号/ }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: "确认移除" }).click();
   await expect(dialog.getByRole("alert")).toContainText(
-    "无法清除系统保存的密码",
+    "无法清除本地保存的密码",
   );
   expect(await page.evaluate(() => (window as any).removed)).toEqual([]);
   await page.evaluate(() => {

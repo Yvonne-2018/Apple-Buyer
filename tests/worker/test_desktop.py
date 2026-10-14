@@ -45,6 +45,18 @@ class ChannelTests(unittest.TestCase):
 
 
 class ServiceTests(unittest.TestCase):
+    def test_address_preserves_optional_pickup_id_suffix(self):
+        config = {'contact': {'lastName': '测试', 'firstName': '用户',
+            'emailAddress': 'test@example.invalid', 'fullDaytimePhone': '13800000000',
+            'nationalIdLast4': '123x'}, 'delivery': {'state': '江苏', 'city': '无锡', 'district': '梁溪区'},
+            'address': {'street': '测试街道'}}
+        self.assertEqual(validate_address(config)['contact']['nationalIdLast4'], '123X')
+        config['contact']['nationalIdLast4'] = ''
+        self.assertNotIn('nationalIdLast4', validate_address(config)['contact'])
+        config['contact']['nationalIdLast4'] = '12345'
+        with self.assertRaisesRegex(ValueError, '后四位'):
+            validate_address(config)
+
     def setUp(self):
         self.globals = {key: getattr(duo_killer, key) for key in ('ROOT','AUTH_PATH','LOG_PATH','PAYMENT_ROOT')}
         import alipay_qr
@@ -170,9 +182,10 @@ class AccountRemovalTests(unittest.TestCase):
     def test_forget_mode_only_deletes_the_requested_vault_entry(self):
         import main
         account = str(uuid.uuid4())
-        with patch.object(sys, 'argv', ['worker', '--forget-account', account]), patch('credentials.Vault') as vault:
+        with patch.object(sys, 'argv', ['worker', '--forget-account', account, '--data-dir', '/tmp/local-password-test']), patch('credentials.LocalVault') as vault, patch('credentials.Vault') as system:
             main.main()
             vault.return_value.delete.assert_called_once_with(account)
+            system.assert_not_called()
 
     def test_forget_mode_rejects_paths_and_local_scope(self):
         import main

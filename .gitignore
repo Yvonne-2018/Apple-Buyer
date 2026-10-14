@@ -12,6 +12,8 @@ __pycache__/
 artifacts/
 auth*.json
 accounts.json
+local-password.json
+local-password.json.*
 checkout.json
 purchase.json
 task.json

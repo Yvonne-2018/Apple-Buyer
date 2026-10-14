@@ -21,6 +21,7 @@ export type Action =
   | "region"
   | "import_auth"
   | "forget_password"
+  | "password_save"
   | "qr";
 export type Data = Record<string, any>;
 export interface Prompt {
@@ -76,7 +77,8 @@ export const actionNames: Record<Action, string> = {
   address_save: "保存地址预设",
   region: "读取当前地区",
   import_auth: "导入会话",
-  forget_password: "忘记密码",
+  forget_password: "清除本地密码",
+  password_save: "设置本地密码",
   qr: "获取付款二维码",
 };
 export const stateNames: Record<string, string> = {

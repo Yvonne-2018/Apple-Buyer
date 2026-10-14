@@ -10,7 +10,7 @@ import interaction
 import duo_killer
 import alipay_qr
 import checkout_options
-from credentials import Vault
+from credentials import LocalVault
 
 
 def empty_auth(account):
@@ -21,13 +21,14 @@ def empty_auth(account):
 class Service:
     def __init__(self, channel, account_dir, task_dir, account, vault=None):
         self.channel, self.root, self.task_dir, self.account = channel, account_dir, task_dir, account
-        self.vault = vault or Vault()
+        self.vault = vault if vault is not None else LocalVault(account_dir)
         self.password = None
         self.remember = False
         self.authentication_requested = False
         self.authentication_failed = False
         self.action = None
         self.submitted = False
+        self.checkout_preferences = {}
         self.auth = self.root / 'auth.json'
         self.checkout = self.root / 'checkout.json'
         duo_killer.ROOT, duo_killer.AUTH_PATH, duo_killer.LOG_PATH = self.root, self.auth, self.task_dir / 'requests.log'
@@ -68,7 +69,7 @@ class Service:
             try:
                 self.password = self.vault.get(self.channel.account_id)
             except Exception:
-                self.stage('系统凭据保险库不可用，请输入本次登录密码')
+                self.stage('本地密码无法读取，请重新输入 Apple 账号密码')
         if not self.password:
             value = self.channel.prompt('password', '输入 Apple 账号密码', account=self.account)
             if not isinstance(value, dict) or not isinstance(value.get('password'), str) or not value['password']:
@@ -96,6 +97,14 @@ class Service:
         return value
 
     def choose(self, label, options, default=None):
+        if self.checkout_preferences.get('auto_submit'):
+            keys = [key for key, _ in options]
+            if default in keys:
+                self.stage(label + '：使用默认选项')
+                return default
+            if len(keys) == 1:
+                return keys[0]
+            raise ValueError(label + '：缺少唯一默认值，请先在配置中指定后再抢购。')
         return self.channel.prompt('select', label, options=[{'value': k, 'label': v} for k, v in options], default=default)
 
     def confirm(self, details):
@@ -111,12 +120,17 @@ class Service:
         self.submitted = self.submitted or fields.get('order_submitted', False)
         self.channel.emit('stage', message=stage, **fields)
 
+    def wait_retry(self, seconds):
+        self.channel.checkpoint()
+        self.channel.cancelled.wait(seconds)
+        self.channel.checkpoint()
+
     def persist_password(self):
         if self.remember and self.password:
             try:
                 self.vault.save(self.channel.account_id, self.password)
             except Exception:
-                self.stage('操作成功，但系统未保存密码；下次登录需重新输入')
+                self.stage('操作成功，但本地密码保存失败；下次登录需重新输入')
 
     def cleanup_credentials(self, error=None):
         if self.should_remove_account(error):
@@ -195,6 +209,34 @@ class Service:
     def run(self, action, params):
         self.action = action
         self.channel.checkpoint()
+        if action in ('purchase', 'checkout') and 'checkout_preferences' in params:
+            preferences = params['checkout_preferences']
+            if not isinstance(preferences, dict):
+                raise ValueError('提货配置格式不正确。')
+            mode = preferences.get('mode', 'HOME')
+            city = preferences.get('city', '')
+            store = preferences.get('store', '')
+            if (mode not in ('HOME', 'RETAIL') or
+                    not all(isinstance(value, str) and len(value) <= 100 for value in (city, store))):
+                raise ValueError('提货方式、城市或门店格式不正确。')
+            if mode == 'RETAIL' and not city.strip():
+                raise ValueError('选择门店自提时，请先填写提货城市。')
+            auto_submit = preferences.get('auto_submit', False)
+            if type(auto_submit) is not bool:
+                raise ValueError('自动提交配置格式不正确。')
+            if auto_submit and (action != 'purchase' or (mode == 'RETAIL' and not store.strip())):
+                raise ValueError('自动下单需指定商品，自提还需指定门店。')
+            wait_for_release = preferences.get('wait_for_release', False)
+            if type(wait_for_release) is not bool:
+                raise ValueError('等待上架开关格式不正确。')
+            fallback = preferences.get('fallback_configurations', False)
+            if type(fallback) is not bool:
+                raise ValueError('自动换配置开关格式不正确。')
+            if fallback and (action != 'purchase' or mode != 'RETAIL' or not store.strip()):
+                raise ValueError('自动换配置仅支持指定门店的商品购买。')
+            self.checkout_preferences = {'mode': mode, 'city': city.strip(), 'store': store.strip(),
+                                         'auto_submit': auto_submit, 'fallback_configurations': fallback,
+                                         'wait_for_release': wait_for_release}
         if action == 'address_read':
             return {'success': True, 'config': checkout_options.read_config(self.checkout)}
         if action == 'address_save':
@@ -206,9 +248,15 @@ class Service:
             data = validate_import(params.get('data'), self.account)
             duo_killer.write_private_json(self.auth, data)
             return {'success': True, 'message': '会话已导入，点击检查登录以确认有效性。'}
+        if action == 'password_save':
+            value = self.channel.prompt('password', '设置本地 Apple 账号密码', account=self.account)
+            if not isinstance(value, dict) or not value.get('remember'):
+                return {'success': True, 'message': '未勾选本地保存，密码未写入。'}
+            self.vault.save(self.channel.account_id, value.get('password'))
+            return {'success': True, 'message': '密码已保存在本机；后续自动读取，不访问钥匙串。尚未验证密码是否正确。'}
         if action == 'forget_password':
             self.vault.delete(self.channel.account_id)
-            return {'success': True, 'message': '已删除系统保存的密码。'}
+            return {'success': True, 'message': '已清除本地保存的密码；已登录会话仍保留。'}
         if action == 'catalog':
             from shop_catalog import query_store, query_duo
             return query_duo(duo_killer.request_get) if params.get('mode') == 'duo' else query_store(duo_killer.request_get, phone_only=params.get('mode') == 'phone')
@@ -289,6 +337,11 @@ def validate_address(data):
         raise ValueError('请输入正确的手机号码。')
     if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', result['contact']['emailAddress']):
         raise ValueError('请输入正确的通知邮箱。')
+    suffix = data.get('contact', {}).get('nationalIdLast4', '')
+    if not isinstance(suffix, str) or (suffix.strip() and not re.fullmatch(r'[A-Za-z0-9]{4}', suffix.strip())):
+        raise ValueError('提货证件后四位须为 4 位字母或数字，无需完整证件号码。')
+    if suffix.strip():
+        result['contact']['nationalIdLast4'] = suffix.strip().upper()
     return result
 
 

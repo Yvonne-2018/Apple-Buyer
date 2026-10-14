@@ -104,7 +104,7 @@ def fetch_public(request_get, url):
     # 每个请求独立使用匿名会话；不共享或写回 auth.json。
     with requests.Session() as session:
         session.headers.update(HEADERS)
-        response = request_get(session, "查询商店推荐", url, allow_redirects=False)
+        response = request_get(session, "查询商店推荐", url, safe_retry=True, allow_redirects=False)
         if response.status_code != 200:
             raise ValueError(f"商品页查询失败：HTTP {response.status_code}")
         return response.text

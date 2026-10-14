@@ -632,6 +632,28 @@ p {
   margin-bottom: 17px;
   word-break: break-all;
 }
+.checkout-fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 14px;
+}
+.checkout-fields select {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 7px;
+}
+.task-progress {
+  margin: 12px 0 16px;
+  padding-left: 23px;
+  max-height: 210px;
+  overflow: auto;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.task-progress li:last-child {
+  color: var(--accent);
+  font-weight: 600;
+}
 .status {
   display: inline-flex;
   align-items: center;

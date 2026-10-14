@@ -7,6 +7,7 @@ const addressFields = [
   ["contact", "firstName", "名字", "例如：三", "given-name"],
   ["contact", "emailAddress", "通知邮箱", "例如：name@example.com", "email"],
   ["contact", "fullDaytimePhone", "手机号", "收件人的手机号码", "tel-national"],
+  ["contact", "nationalIdLast4", "提货证件后四位", "自提需要时填写，仅后四位", "off"],
   ["delivery", "state", "省 / 直辖市", "例如：四川", "address-level1"],
   ["delivery", "city", "城市", "例如：成都", "address-level2"],
   ["delivery", "district", "区 / 县", "例如：锦江区", "address-level3"],
@@ -67,7 +68,7 @@ export function AddressForm({
       <p className="address-guidance">
         {result?.config?.address?.street
           ? "已预填保存的地址，可直接修改。修改后点击“保存地址预设”。"
-          : "填写收件人和送货地点；输入框中的示例仅作提示，所有项目均需填写。"}
+          : "填写收件人和送货地点；证件后四位用于门店自提，其余项目均需填写。"}
       </p>
       <form
         onSubmit={(e) => {
@@ -81,7 +82,9 @@ export function AddressForm({
               <label key={key}>
                 {label}
                 <input
-                  required
+                  required={key !== "nationalIdLast4"}
+                  maxLength={key === "nationalIdLast4" ? 4 : undefined}
+                  pattern={key === "nationalIdLast4" ? "[A-Za-z0-9]{4}" : undefined}
                   disabled={busy}
                   type={
                     key === "emailAddress"
@@ -92,7 +95,7 @@ export function AddressForm({
                   }
                   value={form[group]?.[key] || ""}
                   placeholder={placeholder}
-                  autoComplete={`shipping ${autoComplete}`}
+                  autoComplete={autoComplete === "off" ? "off" : `shipping ${autoComplete}`}
                   onChange={(e) =>
                     setForm({
                       ...form,
