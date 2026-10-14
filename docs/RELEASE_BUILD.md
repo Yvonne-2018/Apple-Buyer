@@ -5,6 +5,7 @@
 - Mac M 系列：`macos-15` arm64 runner，Python 3.12 arm64，输出 DMG。
 - Windows 64 位：`windows-2022` x64 runner，Python 3.12 x64，输出 NSIS `-setup.exe`。
 - Node 固定 22.23.3、pnpm 11.9.0，依赖使用现有锁文件。worker 在目标系统原生打包，包含 Python、依赖和门店 JSON。
+- 流水线统一启用 Python UTF-8，避免 Windows 英文 runner 输出中文时使用 CP1252 报错。
 - Intel Mac 不参与构建；Web 工作流仅手动触发。
 
 工作流：`.github/workflows/build.yml`。手动运行或 `v*` 标签触发，不创建 Release。运行结束后下载对应 Artifacts（保留 30 天），解压得到安装文件。
