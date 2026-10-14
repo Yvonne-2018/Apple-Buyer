@@ -1503,7 +1503,7 @@ class QuantityTests(unittest.TestCase):
             network.assert_not_called()
 
     @contextlib.contextmanager
-    def cart_requests(self, quantities, maximum=10, update_error=None, duplicate=False, missing_action=False):
+    def cart_requests(self, quantities, maximum=10, update_error=None, duplicate=False, missing_action=False, include_other=True):
         part = "MKWA4FE/A"
         module = "shoppingCart.items.item-test.itemQuantity"
         action_url = "/shop/bagx?_a=updateQuantity&_m=" + module + "&version=from-page"
@@ -1512,6 +1512,8 @@ class QuantityTests(unittest.TestCase):
         def model(quantity):
             items = {"item-other": {"d": {"sku": "MJYH4CH/A", "totalPrice": "RMB 100"},
                                     "itemQuantity": {"d": {"quantity": 1}}}}
+            if not include_other:
+                items = {}
             if quantity:
                 item = {"d": {"sku": part, "totalPrice": f"RMB {quantity * 799}"},
                         "itemQuantity": {"d": {"quantity": quantity, "maxQuantity": maximum},
@@ -1630,7 +1632,7 @@ class QuantityTests(unittest.TestCase):
                 patch.object(duo_killer, "check_login", return_value={"logged_in": True}), \
                 patch.object(duo_killer, "ensure_strong_login", return_value=False), \
                 patch.object(duo_killer, "pay_bag") as pay, \
-                self.cart_requests([0, 1], maximum=2) as (request, save):
+                self.cart_requests([0, 1], maximum=2, include_other=False) as (request, save):
             duo_killer.AUTH_PATH.write_text('{}')
             with self.assertRaisesRegex(ValueError, "超过页面允许"):
                 duo_killer.purchase_sku("MKWA4FE/A", quantity=3)

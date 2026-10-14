@@ -47,6 +47,12 @@ export function localWebBridge(): Bridge {
     snapshot: () => call("snapshot"),
     add: (email) => call("add_account", { email }),
     remove: (accountId) => call("remove_account", { accountId }),
+    listTemplates: (accountId) => call("list_templates", { accountId }),
+    templateSource: (accountId) => call("template_source", { accountId }),
+    saveTemplate: (accountId, template, isDefault) =>
+      call("save_template", { accountId, template, isDefault }),
+    deleteTemplate: (accountId, templateId) =>
+      call("delete_template", { accountId, templateId }),
     savePreset: (accountId, sku, quantity) =>
       call("save_preset", { accountId, sku, quantity }),
     start: (accountId, action, params) =>

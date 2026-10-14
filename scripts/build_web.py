@@ -47,7 +47,8 @@ def main():
                         '--name', 'duo-killer-worker', '--distpath', str(staging / 'python-dist'),
                         '--workpath', str(ROOT / 'local-web/target/python-build'),
                         '--specpath', str(ROOT / 'local-web/target/python-build'),
-                        '--paths', str(ROOT / 'worker/legacy'), '--collect-all', 'playwright',
+                        '--paths', str(ROOT / 'worker/legacy'),
+                        '--add-data', str(ROOT / 'worker/data') + ':data', '--collect-all', 'playwright',
                         '--collect-data', 'tzdata', '--hidden-import', backend,
                         '--hidden-import', 'srp._pysrp', '--hidden-import', 'qrcode.image.pure',
                         str(ROOT / 'worker/main.py')], cwd=ROOT, check=True)

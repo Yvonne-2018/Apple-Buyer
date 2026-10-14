@@ -36,6 +36,7 @@
 | `accounts.json`               | 账号邮箱、昵称及购买预设   |
 | `auth.json`                   | Cookie、设备信任与认证会话 |
 | `checkout.json`               | 联系人、电话、邮箱及地址   |
+| `order-templates.json` / `template-checkout.json` | 下单模板及任务使用的联系人、地址、收货与购买配置 |
 | `task.json` / `payment*.json` | 任务结果、订单及支付信息   |
 | `.chrome-profile/`            | 专用浏览器资料             |
 | `.dev-web.json`               | 本地开发服务访问凭证       |

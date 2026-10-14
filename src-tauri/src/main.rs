@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod engine;
-use engine::{Account, Engine, Snapshot, TaskHost};
+use engine::{Account, Engine, OrderTemplate, Snapshot, TaskHost, TemplateStore};
 use serde_json::Value;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -32,6 +32,22 @@ fn save_preset(
     quantity: u32,
 ) -> Result<Account, String> {
     state.save_preset(&account_id, sku, quantity)
+}
+#[tauri::command]
+fn list_templates(state: State<'_, Arc<Engine>>, account_id: String) -> Result<TemplateStore, String> {
+    state.list_templates(&account_id)
+}
+#[tauri::command]
+fn template_source(state: State<'_, Arc<Engine>>, account_id: String) -> Result<Value, String> {
+    state.template_source(&account_id)
+}
+#[tauri::command]
+fn save_template(state: State<'_, Arc<Engine>>, account_id: String, template: OrderTemplate, is_default: bool) -> Result<TemplateStore, String> {
+    state.save_template(&account_id, template, is_default)
+}
+#[tauri::command]
+fn delete_template(state: State<'_, Arc<Engine>>, account_id: String, template_id: String) -> Result<TemplateStore, String> {
+    state.delete_template(&account_id, &template_id)
 }
 #[tauri::command]
 async fn start_task(
@@ -118,6 +134,10 @@ fn main() {
             add_account,
             remove_account,
             save_preset,
+            list_templates,
+            template_source,
+            save_template,
+            delete_template,
             start_task,
             reply_task,
             cancel_task

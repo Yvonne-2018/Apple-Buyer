@@ -16,6 +16,10 @@ use tokio::{
 };
 use uuid::Uuid;
 
+#[path = "order_templates.rs"]
+mod order_templates;
+pub use order_templates::{OrderTemplate, TemplateStore};
+
 const ACTIONS: &[&str] = &[
     "enroll",
     "login",
@@ -136,6 +140,7 @@ pub struct Engine {
     locks: Mutex<HashMap<String, Arc<Semaphore>>>,
     defaults: Mutex<Account>,
     removing: Mutex<HashSet<String>>,
+    template_lock: Mutex<()>,
 }
 
 // Keep task submission and removal exclusive, including while the vault worker runs.
@@ -218,6 +223,7 @@ impl Engine {
             locks: Mutex::new(HashMap::new()),
             defaults: Mutex::new(defaults),
             removing: Mutex::new(HashSet::new()),
+            template_lock: Mutex::new(()),
         }))
     }
     pub fn snapshot(&self) -> Snapshot {
@@ -381,6 +387,52 @@ impl Engine {
         *accounts = next;
         Ok(result)
     }
+    fn template_path(&self, account_id: &str) -> Result<PathBuf, String> {
+        Uuid::parse_str(account_id).map_err(|_| "账号标识无效")?;
+        if !self.accounts.lock().unwrap().iter().any(|a| a.id == account_id) {
+            return Err("账号不存在，请先添加账号".into());
+        }
+        Ok(scope_dir(&self.root, account_id).join("order-templates.json"))
+    }
+    pub fn list_templates(&self, account_id: &str) -> Result<TemplateStore, String> {
+        let _lock = self.template_lock.lock().unwrap();
+        TemplateStore::read(&self.template_path(account_id)?)
+    }
+    pub fn template_source(&self, account_id: &str) -> Result<Value, String> {
+        let path = self.template_path(account_id)?.with_file_name("checkout.json");
+        let raw: Value = if path.exists() {
+            serde_json::from_slice(&fs::read(path).map_err(|_| "无法读取原地址预设")?).map_err(|_| "原地址预设格式损坏")?
+        } else { json!({}) };
+        let mut result = json!({"contact": {}, "delivery": {}, "address": {}});
+        for (group, keys) in [
+            ("contact", vec!["lastName", "firstName", "emailAddress", "fullDaytimePhone", "nationalIdLast4"]),
+            ("delivery", vec!["state", "city", "district"]),
+            ("address", vec!["street", "street2"]),
+        ] {
+            for key in keys {
+                if let Some(value) = raw[group][key].as_str() { result[group][key] = json!(value); }
+            }
+        }
+        Ok(result)
+    }
+    pub fn save_template(&self, account_id: &str, template: OrderTemplate, is_default: bool) -> Result<TemplateStore, String> {
+        let removing = self.removing.lock().unwrap();
+        if removing.contains(account_id) { return Err("账号正在移除，无法保存模板".into()); }
+        let _lock = self.template_lock.lock().unwrap();
+        let path = self.template_path(account_id)?;
+        let mut store = TemplateStore::read(&path)?;
+        store.save(&path, template, is_default)?;
+        Ok(store)
+    }
+    pub fn delete_template(&self, account_id: &str, template_id: &str) -> Result<TemplateStore, String> {
+        let removing = self.removing.lock().unwrap();
+        if removing.contains(account_id) { return Err("账号正在移除，无法删除模板".into()); }
+        let _lock = self.template_lock.lock().unwrap();
+        let path = self.template_path(account_id)?;
+        let mut store = TemplateStore::read(&path)?;
+        store.delete(&path, template_id)?;
+        Ok(store)
+    }
     fn remove_invalid_account(&self, id: &str, current_task: &str) -> Result<bool, String> {
         let mut accounts = self.accounts.lock().unwrap();
         // Incomplete enrollment is still a draft, not an expired saved account.
@@ -434,7 +486,7 @@ impl Engine {
         app: TaskHost,
         account_id: String,
         action: String,
-        params: Value,
+        mut params: Value,
     ) -> Result<String, String> {
         if !ACTIONS.contains(&action.as_str()) || !params.is_object() {
             return Err("不支持的操作或参数".into());
@@ -464,7 +516,23 @@ impl Engine {
         {
             return Err("请先完成账号添加与登录验证".into());
         }
+        if params.get("order_template").is_some() {
+            return Err("请通过已保存的模板发起下单".into());
+        }
+        let using_template = params.get("template_id").is_some();
+        if using_template {
+            if action != "purchase" { return Err("下单模板仅用于购买商品".into()); }
+            let template_id = params["template_id"].as_str().ok_or("模板标识无效")?;
+            let store = self.list_templates(&account_id)?;
+            let template = store.templates.into_iter().find(|t| t.id == template_id).ok_or("模板不存在或不属于此账号")?;
+            // Freeze the saved revision before queueing; browser parameters cannot override it.
+            params = json!({"order_template": template, "template_account_id": account_id});
+        }
         let mut tasks = self.tasks.lock().unwrap();
+        if using_template && tasks.values().any(|t| t.account_id == account_id && !terminal(&t.status)
+            && matches!(t.action.as_str(), "purchase" | "checkout")) {
+            return Err("该账号已有下单任务，请完成或取消后再操作".into());
+        }
         if tasks
             .values()
             .filter(|t| t.account_id == account_id && !terminal(&t.status))
@@ -794,6 +862,47 @@ async fn stop_process(pid: u32) {
             .args(["-TERM", &pid.to_string()])
             .output()
             .await;
+    }
+}
+
+#[cfg(test)]
+mod template_tests {
+    use super::*;
+
+    #[test]
+    fn templates_and_imported_addresses_belong_to_one_account_and_survive_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = Engine::new(temp.path().into()).unwrap();
+        let a = engine.add_account("a@example.test".into()).unwrap();
+        let b = engine.add_account("b@example.test".into()).unwrap();
+        let template: OrderTemplate = serde_json::from_value(json!({"schema_version":1,"name":"A 的模板","sku":"MLH74FE","quantity":1})).unwrap();
+        let saved = engine.save_template(&a.id, template, true).unwrap();
+        assert!(engine.list_templates(&b.id).unwrap().templates.is_empty());
+        assert!(engine.save_template(&b.id, saved.templates[0].clone(), true).is_err());
+        assert!(engine.delete_template(&b.id, &saved.templates[0].id).is_err());
+        private_json(&scope_dir(&engine.root, &a.id).join("checkout.json"), &json!({"contact":{"firstName":"测试","password":"never-copy"},"address":{"street":"合成测试地址"}})).unwrap();
+        assert_eq!(engine.template_source(&a.id).unwrap()["address"]["street"], "合成测试地址");
+        assert!(engine.template_source(&a.id).unwrap()["contact"].get("password").is_none());
+        assert_eq!(Engine::new(temp.path().into()).unwrap().list_templates(&a.id).unwrap().default_id, saved.default_id);
+        assert!(engine.list_templates("../outside").is_err());
+        #[cfg(unix)] {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(fs::metadata(engine.template_path(&a.id).unwrap()).unwrap().permissions().mode() & 0o077, 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn template_submission_rejects_duplicate_orders_and_browser_snapshots() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = Engine::new(temp.path().into()).unwrap();
+        let a = engine.add_account("a@example.test".into()).unwrap();
+        engine.sync_account_identity(&a.id, &json!({"success":true,"logged_in":true,"scope":"account","apple_id":a.email}), true).unwrap();
+        let saved = engine.save_template(&a.id, serde_json::from_value(json!({"schema_version":1,"name":"测试","sku":"MLH74FE","quantity":1})).unwrap(), false).unwrap();
+        let host = TaskHost { worker: PathBuf::from("unused"), script: None, on_update: Arc::new(|_| {}) };
+        assert!(engine.start(host.clone(), a.id.clone(), "purchase".into(), json!({"order_template":{}})).unwrap_err().contains("已保存"));
+        let task = Task { id: Uuid::new_v4().to_string(), account_id: a.id.clone(), action: "purchase".into(), status: "running".into(), stage: String::new(), created_at:0, updated_at:0, prompt:None, result:None, order_submitted:false, logs:vec![] };
+        engine.tasks.lock().unwrap().insert(task.id.clone(), task);
+        assert!(engine.start(host, a.id.clone(), "purchase".into(), json!({"template_id":saved.templates[0].id})).unwrap_err().contains("已有下单任务"));
     }
 }
 

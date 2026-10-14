@@ -3,6 +3,7 @@ import base64
 import json
 import logging
 import re
+from time import perf_counter
 from pathlib import Path
 
 import requests
@@ -29,6 +30,7 @@ class Service:
         self.action = None
         self.submitted = False
         self.checkout_preferences = {}
+        self.template_policy = None
         self.auth = self.root / 'auth.json'
         self.checkout = self.root / 'checkout.json'
         duo_killer.ROOT, duo_killer.AUTH_PATH, duo_killer.LOG_PATH = self.root, self.auth, self.task_dir / 'requests.log'
@@ -80,6 +82,8 @@ class Service:
 
     def text(self, label, default=''):
         kind = 'code' if '验证码' in label else 'text'
+        if self.template_policy and kind != 'code':
+            raise ValueError('模板执行缺少业务配置：' + label.replace('👉 ', '') + '。请编辑模板后重新执行。')
         label = label.replace('👉 ', '')
         fields = {}
         if kind == 'code':
@@ -97,6 +101,8 @@ class Service:
         return value
 
     def choose(self, label, options, default=None):
+        if self.template_policy:
+            raise ValueError('模板未能唯一确定' + label + '，请编辑模板后重新执行。')
         if self.checkout_preferences.get('auto_submit'):
             keys = [key for key, _ in options]
             if default in keys:
@@ -108,6 +114,8 @@ class Service:
         return self.channel.prompt('select', label, options=[{'value': k, 'label': v} for k, v in options], default=default)
 
     def confirm(self, details):
+        if self.template_policy:
+            raise ValueError('模板订单未完成自动核验，未提交订单。')
         return self.channel.prompt('confirm', '确认商品与金额，创建订单', details=details, account=self.account)
 
     def stage(self, stage, **fields):
@@ -209,6 +217,18 @@ class Service:
     def run(self, action, params):
         self.action = action
         self.channel.checkpoint()
+        started = perf_counter()
+        if 'order_template' in params:
+            if action != 'purchase' or params.get('template_account_id') != self.channel.account_id:
+                raise ValueError('模板与当前账号或操作不匹配。')
+            from order_template import TemplatePolicy
+            self.template_policy = TemplatePolicy(params['order_template'])
+            template = self.template_policy.data
+            self.checkout = self.task_dir / 'template-checkout.json'
+            checkout_options.save_config(self.checkout, {key: template[key] for key in ('contact', 'delivery', 'address')})
+            params = {'sku': template['sku'], 'quantity': template['quantity'],
+                      'checkout_preferences': self.template_policy.preferences()}
+            self.stage('模板已校验，开始一键下单：' + template['name'])
         if action in ('purchase', 'checkout') and 'checkout_preferences' in params:
             preferences = params['checkout_preferences']
             if not isinstance(preferences, dict):
@@ -216,6 +236,13 @@ class Service:
             mode = preferences.get('mode', 'HOME')
             city = preferences.get('city', '')
             store = preferences.get('store', '')
+            store_ids = preferences.get('store_ids', [])
+            if store_ids != []:
+                from retail_stores import validate_store_ids
+                store_ids = validate_store_ids(city, store_ids)
+                if mode != 'RETAIL':
+                    raise ValueError('只有门店自提可配置门店列表。')
+                store = store_ids[0]
             if (mode not in ('HOME', 'RETAIL') or
                     not all(isinstance(value, str) and len(value) <= 100 for value in (city, store))):
                 raise ValueError('提货方式、城市或门店格式不正确。')
@@ -235,6 +262,7 @@ class Service:
             if fallback and (action != 'purchase' or mode != 'RETAIL' or not store.strip()):
                 raise ValueError('自动换配置仅支持指定门店的商品购买。')
             self.checkout_preferences = {'mode': mode, 'city': city.strip(), 'store': store.strip(),
+                                         'store_ids': store_ids,
                                          'auto_submit': auto_submit, 'fallback_configurations': fallback,
                                          'wait_for_release': wait_for_release}
         if action == 'address_read':
@@ -311,6 +339,9 @@ class Service:
             if path.parent != self.task_dir.resolve() or path.stat().st_size > 2_000_000:
                 raise ValueError('二维码文件不在当前任务目录。')
             result['qr_data'] = 'data:image/png;base64,' + base64.b64encode(path.read_bytes()).decode()
+        if self.template_policy:
+            result.update(template_id=self.template_policy.data['id'], template_name=self.template_policy.data['name'],
+                          template_revision=self.template_policy.data['revision'], elapsed_ms=int((perf_counter() - started) * 1000))
         return result
 
 

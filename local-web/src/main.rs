@@ -12,7 +12,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use engine::{Engine, Task, TaskHost};
+use engine::{Engine, OrderTemplate, Task, TaskHost};
 use fs2::FileExt;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -53,6 +53,12 @@ struct Input {
     sku: String,
     #[serde(default)]
     quantity: u32,
+    #[serde(default)]
+    template: OrderTemplate,
+    #[serde(default)]
+    template_id: String,
+    #[serde(default)]
+    is_default: bool,
 }
 
 async fn command(
@@ -68,6 +74,10 @@ async fn command(
             .engine
             .save_preset(&p.account_id, p.sku, p.quantity)
             .map(|a| json!(a)),
+        "list_templates" => s.engine.list_templates(&p.account_id).map(|v| json!(v)),
+        "template_source" => s.engine.template_source(&p.account_id),
+        "save_template" => s.engine.save_template(&p.account_id, p.template, p.is_default).map(|v| json!(v)),
+        "delete_template" => s.engine.delete_template(&p.account_id, &p.template_id).map(|v| json!(v)),
         "start_task" => s
             .engine
             .start(s.host, p.account_id, p.action, p.params)

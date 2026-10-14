@@ -10,9 +10,10 @@ from shop_catalog import HEADERS, PART, text
 
 
 class PickupUnavailable(ValueError):
-    def __init__(self, store_id):
+    def __init__(self, store_id, store_ids=None):
         super().__init__('指定门店当前配置不可取货：' + store_id)
         self.store_id = store_id
+        self.store_ids = tuple(store_ids or [store_id])
 
 
 def capacity_gb(value):

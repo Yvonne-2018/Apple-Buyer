@@ -2,31 +2,40 @@ name: Desktop packages
 on:
   workflow_dispatch:
   push:
-    tags: ['v*']
+    tags: ["v*"]
+permissions:
+  contents: read
+concurrency:
+  group: desktop-packages-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build:
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             label: mac-arm64
-          - os: macos-15-intel
-            label: mac-x64
-          - os: windows-latest
+            architecture: arm64
+            package: src-tauri/target/release/bundle/dmg/*.dmg
+          - os: windows-2022
             label: win-x64
+            architecture: x64
+            package: src-tauri/target/release/bundle/nsis/*-setup.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22.23.3"
       - uses: pnpm/action-setup@v4
         with:
-          version: '11.9.0'
+          version: "11.9.0"
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
+          architecture: ${{ matrix.architecture }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -41,12 +50,24 @@ jobs:
       - run: pnpm exec playwright install chromium
       - run: pnpm test:ui
       - run: pnpm bundle
-      - if: runner.os == 'macOS'
-        run: ditto -c -k --sequesterRsrc --keepParent "src-tauri/target/release/bundle/macos/DUO Killer.app" "src-tauri/target/release/bundle/DUO Killer-app.zip"
-      - if: runner.os == 'Windows'
+      - name: Verify packaged worker in macOS app
+        if: runner.os == 'macOS'
+        run: python scripts/smoke_worker.py "src-tauri/target/release/bundle/macos/DUO Killer.app/Contents/Resources/worker/duo-killer-worker"
+      - name: Verify Windows installer
+        if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path "src-tauri/target/release/bundle/portable/DUO Killer" -DestinationPath "src-tauri/target/release/bundle/DUO Killer-app.zip"
+        run: |
+          $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe"
+          if ($installer.Count -ne 1) { throw 'Expected exactly one Windows installer' }
+          $installDir = Join-Path $env:RUNNER_TEMP 'duo-installed'
+          $process = Start-Process -FilePath $installer.FullName -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          if (-not (Test-Path (Join-Path $installDir 'duo-killer.exe'))) { throw 'Installed application missing' }
+          python scripts/smoke_worker.py (Join-Path $installDir 'worker/duo-killer-worker.exe')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
           name: duo-killer-${{ matrix.label }}
-          path: src-tauri/target/release/bundle/DUO Killer-app.zip
+          path: ${{ matrix.package }}
+          if-no-files-found: error
+          retention-days: 30

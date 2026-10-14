@@ -259,6 +259,16 @@ function PurchasePreset({
           setStatus("");
           try {
             await bridge.savePreset(account.id, sku, quantity);
+            try {
+              const key = "duo.purchase.v1." + account.id;
+              const previous = JSON.parse(localStorage.getItem(key) || "{}");
+              localStorage.setItem(
+                key,
+                JSON.stringify({ ...previous, sku, quantity }),
+              );
+            } catch {
+              // 本地缓存不可用时，仍使用已保存的账号预设。
+            }
             await refresh();
             setStatus("购买预设已保存");
           } catch (e) {

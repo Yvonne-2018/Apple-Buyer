@@ -1375,3 +1375,183 @@ button.danger-button:hover:not(:disabled) {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+.template-heading,
+.template-summary-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.template-heading h3,
+.template-heading p {
+  margin: 0 0 6px;
+}
+.template-heading {
+  margin-bottom: 18px;
+}
+.template-summary {
+  margin: 14px 0;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+.template-summary p {
+  margin: 10px 0;
+}
+.template-ready {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+}
+.template-missing {
+  color: var(--error);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.template-status {
+  color: var(--accent);
+}
+.template-editor {
+  padding-top: 16px;
+}
+.template-editor fieldset {
+  padding: 16px;
+  margin: 0 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-width: 0;
+}
+.template-editor legend {
+  font-weight: 600;
+  padding: 0 6px;
+}
+.template-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+.template-editor label {
+  min-width: 0;
+}
+.template-editor textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 80px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+  resize: vertical;
+}
+.template-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.template-checkbox input {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  padding: 0;
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
+.pickup-store-select {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 12px 0;
+}
+.pickup-store-select p {
+  margin: 0;
+}
+.pickup-store-select .pickup-store-options {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.pickup-store-options .pickup-store-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 0;
+  margin: 0;
+  cursor: pointer;
+}
+.pickup-store-option input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  padding: 0;
+  margin: 3px 0 0;
+}
+.pickup-store-option span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.pickup-store-option small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.pickup-store-priority ol {
+  margin: 8px 0 0;
+  padding-left: 26px;
+}
+.pickup-store-priority li {
+  padding: 6px 0;
+}
+.pickup-store-priority li::marker {
+  color: var(--muted);
+}
+.pickup-store-priority li .button-row {
+  display: inline-flex;
+  margin-left: 10px;
+  gap: 4px;
+  vertical-align: middle;
+}
+.pickup-store-priority button {
+  padding: 6px;
+  min-height: 28px;
+}
+.template-editor fieldset > label {
+  margin-bottom: 12px;
+}
+.template-delete {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.legacy-purchase {
+  border-top: 1px solid var(--line);
+  margin-top: 24px;
+  padding-top: 16px;
+}
+.legacy-purchase summary {
+  cursor: pointer;
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+@media (max-width: 650px) {
+  .template-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .template-summary {
+    padding: 14px;
+  }
+  .template-editor fieldset {
+    padding: 12px;
+  }
+}

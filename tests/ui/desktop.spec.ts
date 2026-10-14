@@ -1,5 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
 
+// Encodes plain demo text, never a payment URL.
+const demoQr =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAUoAAAFKAQAAAABTUiuoAAABVklEQVR4nO3ZzQ3DIAwFYEsdgJGyOiN1gEgU2zxD/3vDlZ4PNAlfTq7BpdJ+jSqkpKSkpKQ5qIy4NDmu/fPQZ3ZlcZCmonbTrhcfuhrDMkuah1o6DeitlFP8JU82aU6KxArpv9D+GC+RZqT2gblJl1nSNHRtSObwtXch3UHXsOyWSHYEaRaK9bJvbFV7kSq6xTV0JQdpKqphynOqAyZI81FVvkoisR2caFJIM1HvQGq5/5GG0rzf4ki309E5Ip2CgnxeNEn301qiFltDx+/06TtAupmOnM7DDmxxPkuaigKcoyuJ3c2uXJBmocsCaVe643my54800ix0BtZLLJ8xkKahI4ky6y7K8PUWR7qT2o2WIdr+mdiTNB2NP1eWsw8k24M0I41TqYdGkjQf9UFjVGV5W4ak2ygy2Z/gpTj7JU1GY4Fcm/0Pxx6kG+kvQUpKSkpKup/eACZMGUo5mhscAAAAAElFTkSuQmCC";
+
 // Synthetic API fixture. Never invokes native commands or Apple endpoints.
 async function fixture(
   page: Page,
@@ -7,7 +11,7 @@ async function fixture(
   firstEmail = "first@example.test",
 ) {
   await page.addInitScript(
-    ({ withAccounts, firstEmail }) => {
+    ({ withAccounts, firstEmail, demoQr }) => {
       const accounts = withAccounts
         ? [
             { id: "a", name: "日常账号", email: firstEmail },
@@ -17,6 +21,20 @@ async function fixture(
       const tasks: any[] = [];
       let callback = (task: any) => {};
       let counter = 0;
+      const templateStores: Record<string, any> = JSON.parse(
+        localStorage.getItem("fixture.templates") || "{}",
+      );
+      const templateStore = (id: string) =>
+        (templateStores[id] ||= {
+          schema_version: 1,
+          default_id: "",
+          templates: [],
+        });
+      const persistTemplates = () =>
+        localStorage.setItem(
+          "fixture.templates",
+          JSON.stringify(templateStores),
+        );
       const update = (task: any) => {
         if (task.result?.account_removed) {
           const index = accounts.findIndex((a) => a.id === task.account_id);
@@ -34,6 +52,50 @@ async function fixture(
         update(t);
       };
       root.__DUO_KILLER_TEST__ = {
+        listTemplates: async (accountId: string) =>
+          structuredClone(templateStore(accountId)),
+        templateSource: async () => ({
+          contact: {
+            lastName: "测试",
+            firstName: "用户",
+            emailAddress: "shipping@example.test",
+            fullDaytimePhone: "13800000000",
+            nationalIdLast4: "123X",
+          },
+          delivery: { state: "四川", city: "成都", district: "锦江区" },
+          address: { street: "离线测试路 8 号" },
+        }),
+        saveTemplate: async (
+          accountId: string,
+          template: any,
+          isDefault: boolean,
+        ) => {
+          const store = templateStore(accountId);
+          const saved = structuredClone(template);
+          if (!saved.id) {
+            saved.id = crypto.randomUUID();
+            saved.revision = 1;
+            store.templates.push(saved);
+          } else {
+            saved.revision++;
+            store.templates[
+              store.templates.findIndex((t: any) => t.id === saved.id)
+            ] = saved;
+          }
+          if (isDefault) store.default_id = saved.id;
+          else if (store.default_id === saved.id) store.default_id = "";
+          persistTemplates();
+          return structuredClone(store);
+        },
+        deleteTemplate: async (accountId: string, templateId: string) => {
+          const store = templateStore(accountId);
+          store.templates = store.templates.filter(
+            (t: any) => t.id !== templateId,
+          );
+          if (store.default_id === templateId) store.default_id = "";
+          persistTemplates();
+          return structuredClone(store);
+        },
         remove: async (accountId: string) => {
           if (root.removeError) throw new Error(root.removeError);
           if (
@@ -111,6 +173,19 @@ async function fixture(
               id: "p-" + id,
               kind: "password",
               label: "输入 Apple 账号密码",
+            };
+          } else if (action === "purchase" && params.template_id) {
+            task.status = "succeeded";
+            task.result = {
+              success: true,
+              status: "pending_payment",
+              order_number: "DEMO-TEMPLATE",
+              amount_due: "RMB 138",
+              template_name: templateStore(accountId).templates.find(
+                (t: any) => t.id === params.template_id,
+              ).name,
+              elapsed_ms: 1200,
+              qr_data: demoQr,
             };
           } else if (action === "purchase") {
             task.status = "waiting";
@@ -278,15 +353,17 @@ async function fixture(
         },
       };
     },
-    { withAccounts, firstEmail },
+    { withAccounts, firstEmail, demoQr },
   );
 }
 
-async function enterWorkspace(page: Page) {
+async function enterWorkspace(page: Page, legacy = true) {
   await page.getByRole("checkbox", { name: /使用 日常账号/ }).check();
   await page.getByRole("checkbox", { name: /使用 备用账号/ }).check();
   await page.getByRole("button", { name: "检查并使用所选账号" }).click();
-  await expect(page.getByRole("button", { name: "立即下单" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "新建模板" })).toBeVisible();
+  if (legacy)
+    await expect(page.getByRole("button", { name: "立即下单" })).toBeVisible();
 }
 
 test("new account is only added after password and OTP succeed", async ({
@@ -322,6 +399,7 @@ test("credentials and leading-zero codes stay with the selected account", async 
   await enterWorkspace(page);
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await page.getByLabel("密码", { exact: true }).fill("fixture-password");
+  await page.getByRole("checkbox", { name: /^保存在本机文件/ }).uncheck();
   await page.getByRole("button", { name: "显示密码" }).click();
   await expect(page.getByLabel("密码", { exact: true })).toHaveAttribute(
     "type",
@@ -420,8 +498,11 @@ test("pickup preferences and Alipay default are shown before purchase", async ({
   await page.goto("/");
   await enterWorkspace(page);
   await page.getByLabel("收货方式").selectOption("RETAIL");
-  await page.getByLabel("提货城市或地区").fill("上海");
-  await page.getByLabel("指定提货门店").fill("上海环贸 iapm");
+  await page.getByRole("combobox", { name: "提货城市", exact: true }).click();
+  await page.getByRole("option", { name: "上海", exact: true }).click();
+  await page
+    .getByRole("checkbox", { name: "选择 Apple 上海环贸 iapm", exact: true })
+    .check();
   await expect(page.getByLabel("支付方式")).toHaveValue("支付宝（默认）");
   await page.getByRole("button", { name: "立即下单" }).click();
   const started = await page.evaluate(() => (window as any).started.at(-1));
@@ -429,7 +510,8 @@ test("pickup preferences and Alipay default are shown before purchase", async ({
   expect(started.params.checkout_preferences).toEqual({
     mode: "RETAIL",
     city: "上海",
-    store: "上海环贸 iapm",
+    store: "R401",
+    store_ids: ["R401"],
     auto_submit: true,
     fallback_configurations: true,
     wait_for_release: true,
@@ -690,7 +772,9 @@ test("preset products fill purchase fields without submitting an order", async (
   const purchase = page.locator("section").filter({
     has: page.getByRole("heading", { name: "购买商品", exact: true }),
   });
-  await expect(purchase.getByRole("button")).toHaveCount(1);
+  await expect(
+    purchase.locator(".legacy-purchase").getByRole("button"),
+  ).toHaveCount(1);
   await expect(
     purchase.getByRole("button", { name: "立即下单" }),
   ).toBeVisible();
@@ -887,7 +971,7 @@ test("cancel remains at the operation's top right for prompts and running states
     fullPage: true,
   });
   await cancel.click();
-  await expect(panel.getByText("已取消", { exact: true })).toBeVisible();
+  await expect(panel.locator(".status")).toContainText("已取消");
   await expect(cancel).toHaveCount(0);
 });
 
@@ -1203,4 +1287,262 @@ test("unfinished enrollment can be removed after cancelling login", async ({
     0,
   );
   await expect(page.getByRole("textbox", { name: "Apple 账号" })).toBeVisible();
+});
+
+test("delivery template imports settings, persists per account, and goes directly to the demo QR", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.goto("/");
+  await enterWorkspace(page);
+  await page
+    .getByRole("button", { name: "从现有配置创建", exact: true })
+    .click();
+  const editor = page.getByRole("form", { name: "下单模板编辑" });
+  await editor
+    .getByLabel("模板名称", { exact: true })
+    .fill("抛光布 · 家里收货");
+  await editor.getByLabel("模板 SKU", { exact: true }).fill("MLH74FE");
+  await editor.getByLabel("模板数量", { exact: true }).fill("1");
+  await editor
+    .getByLabel("订单总额上限（元，含运费）", { exact: true })
+    .fill("200");
+  await expect(editor.getByLabel("模板详细地址", { exact: true })).toHaveValue(
+    "离线测试路 8 号",
+  );
+  await editor.getByRole("checkbox", { name: "设为此账号默认模板" }).check();
+  await editor.getByRole("button", { name: "保存下单模板" }).click();
+  await expect(page.getByText("模板已保存", { exact: true })).toBeVisible();
+  const submit = page.getByRole("button", { name: "按模板一键下单" });
+  await expect(submit).toBeEnabled();
+  await submit.click();
+  await expect(
+    page.getByRole("heading", { name: "订单已创建，等待付款" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("img", { name: /支付宝付款二维码/ }),
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "确认创建订单" })).toHaveCount(
+    0,
+  );
+  const started = await page.evaluate(() =>
+    (window as any).started.filter((t: any) => t.action === "purchase"),
+  );
+  expect(started).toHaveLength(1);
+  expect(Object.keys(started[0].params)).toEqual(["template_id"]);
+  expect(await page.evaluate(() => (window as any).sent)).toEqual([]);
+  await page.screenshot({
+    path: "artifacts/template-payment-demo.png",
+    animations: "disabled",
+    fullPage: true,
+  });
+  await page.reload();
+  await enterWorkspace(page, false);
+  await expect(
+    page.getByRole("combobox", { name: "选择下单模板" }),
+  ).toContainText("抛光布 · 家里收货 · 默认");
+  await page.getByRole("button", { name: /备用账号 seco/ }).click();
+  await expect(
+    page.getByText("还没有下单模板。", { exact: false }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /日常账号 fir/ }).click();
+  await expect(submit).toBeEnabled();
+});
+
+test("pickup templates retain windows and SKU allowlists, copy and delete without changing the original", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.goto("/");
+  await enterWorkspace(page);
+  await page
+    .getByRole("button", { name: "从现有配置创建", exact: true })
+    .click();
+  const editor = page.getByRole("form", { name: "下单模板编辑" });
+  await editor.getByLabel("模板名称", { exact: true }).fill("门店取货");
+  await editor
+    .getByLabel("订单总额上限（元，含运费）", { exact: true })
+    .fill("50000");
+  await editor
+    .getByRole("combobox", { name: "模板收货方式", exact: true })
+    .click();
+  await page
+    .getByRole("listbox")
+    .getByRole("option", { name: "门店自提", exact: true })
+    .click();
+  await editor
+    .getByRole("combobox", { name: "模板提货城市", exact: true })
+    .click();
+  await page.getByRole("option", { name: "成都", exact: true }).click();
+  await editor
+    .getByRole("checkbox", { name: "选择 Apple 成都太古里", exact: true })
+    .check();
+  await editor
+    .getByRole("checkbox", { name: "选择 Apple 成都万象城", exact: true })
+    .check();
+  await editor
+    .getByRole("button", { name: "上移 Apple 成都万象城", exact: true })
+    .click();
+  await expect(editor.getByRole("listitem").first()).toContainText(
+    "成都万象城",
+  );
+  await editor.locator(".pickup-store-select").screenshot({
+    path: "artifacts/pickup-stores-desktop.png",
+    animations: "disabled",
+  });
+  await editor
+    .getByRole("combobox", { name: "模板取货时间", exact: true })
+    .click();
+  await page
+    .getByRole("option", { name: "限定日期与时间范围", exact: true })
+    .click();
+  await editor.getByLabel("取货开始日期", { exact: true }).fill("2026-10-15");
+  await editor.getByLabel("取货结束日期", { exact: true }).fill("2026-10-16");
+  await editor.getByLabel("每天最早取货时间", { exact: true }).fill("10:00");
+  await editor.getByLabel("每天最晚取货时间", { exact: true }).fill("18:00");
+  await editor
+    .getByLabel("允许的替代 SKU", { exact: false })
+    .fill("MK2W4CH\nMK2T4CH");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await editor.locator(".pickup-store-select").screenshot({
+    path: "artifacts/pickup-stores-mobile.png",
+    animations: "disabled",
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: "artifacts/template-editor-mobile.png",
+    animations: "disabled",
+    fullPage: true,
+  });
+  await editor.getByRole("button", { name: "保存下单模板" }).click();
+  await expect(
+    page.getByRole("button", { name: "按模板一键下单" }),
+  ).toBeEnabled();
+  await page.getByRole("button", { name: "编辑", exact: true }).click();
+  await expect(
+    editor.getByRole("checkbox", {
+      name: "选择 Apple 成都万象城",
+      exact: true,
+    }),
+  ).toBeChecked();
+  await expect(
+    editor.getByRole("checkbox", {
+      name: "选择 Apple 成都太古里",
+      exact: true,
+    }),
+  ).toBeChecked();
+  await expect(editor.getByRole("listitem").first()).toContainText(
+    "成都万象城",
+  );
+  expect(
+    await page.evaluate(
+      () =>
+        JSON.parse(localStorage.getItem("fixture.templates") || "{}").a
+          .templates[0].pickup.store_ids,
+    ),
+  ).toEqual(["R502", "R580"]);
+  await expect(editor.getByLabel("取货开始日期", { exact: true })).toHaveValue(
+    "2026-10-15",
+  );
+  await expect(
+    editor.getByLabel("允许的替代 SKU", { exact: false }),
+  ).toHaveValue("MK2W4CH\nMK2T4CH");
+  await editor.getByRole("button", { name: "取消编辑" }).click();
+  await page.getByRole("button", { name: "复制", exact: true }).click();
+  await editor.getByRole("button", { name: "保存下单模板" }).click();
+  await expect(
+    page.getByRole("combobox", { name: "选择下单模板" }),
+  ).toContainText("门店取货 副本");
+  await page.getByRole("button", { name: "删除", exact: true }).click();
+  await page.getByRole("button", { name: "确认删除模板", exact: true }).click();
+  await expect(
+    page.getByRole("combobox", { name: "选择下单模板" }),
+  ).toContainText("门店取货");
+  await expect(
+    page.getByRole("combobox", { name: "选择下单模板" }),
+  ).not.toContainText("副本");
+});
+
+test("incomplete template is saved as a draft and cannot start checkout", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.goto("/");
+  await enterWorkspace(page);
+  await page.getByRole("button", { name: "新建模板", exact: true }).click();
+  const editor = page.getByRole("form", { name: "下单模板编辑" });
+  await editor.getByLabel("模板名称", { exact: true }).fill("待填写模板");
+  await editor.getByRole("button", { name: "保存下单模板" }).click();
+  await expect(
+    page.getByRole("button", { name: "按模板一键下单" }),
+  ).toBeDisabled();
+  await expect(page.locator(".template-summary")).toContainText("订单总额上限");
+  expect(
+    await page.evaluate(() =>
+      (window as any).started.filter((t: any) => t.action === "purchase"),
+    ),
+  ).toHaveLength(0);
+});
+
+test("pickup city lists migrate a legacy store and retain ordered selections across reload", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.addInitScript(() => {
+    if (!localStorage.getItem("retail.migrated")) {
+      localStorage.setItem(
+        "duo.purchase.v1.a",
+        JSON.stringify({
+          mode: "RETAIL",
+          city: "上海市",
+          store: "Apple 上海环贸 iapm",
+        }),
+      );
+      localStorage.setItem("retail.migrated", "true");
+    }
+  });
+  await page.goto("/");
+  await enterWorkspace(page);
+  const selected = page.getByRole("checkbox", {
+    name: "选择 Apple 上海环贸 iapm",
+    exact: true,
+  });
+  await expect(selected).toBeChecked();
+  await page
+    .getByRole("checkbox", { name: "选择 Apple 南京东路", exact: true })
+    .check();
+  await page
+    .getByRole("button", { name: "上移 Apple 南京东路", exact: true })
+    .click();
+  await expect(page.getByRole("listitem").first()).toContainText("南京东路");
+  await page.reload();
+  await enterWorkspace(page);
+  await expect(selected).toBeChecked();
+  await expect(page.getByRole("listitem").first()).toContainText("南京东路");
+  expect(
+    await page.evaluate(
+      () =>
+        JSON.parse(localStorage.getItem("duo.purchase.v1.a") || "{}").store_ids,
+    ),
+  ).toEqual(["R359", "R401"]);
+  await page.getByRole("combobox", { name: "提货城市", exact: true }).click();
+  await expect(page.getByRole("listbox").getByRole("option")).toHaveCount(25);
+  await page.getByRole("option", { name: "成都", exact: true }).click();
+  await expect(page.getByRole("checkbox", { name: /^选择 Apple/ })).toHaveCount(
+    2,
+  );
+  await expect(
+    page.getByRole("checkbox", { name: /^选择 Apple/ }).first(),
+  ).not.toBeChecked();
+  await expect(
+    page.getByRole("checkbox", { name: /^选择 Apple/ }).last(),
+  ).not.toBeChecked();
+  await expect(
+    page.getByRole("button", { name: "立即下单", exact: true }),
+  ).toBeDisabled();
+  await expect(page.getByLabel("门店尝试顺序")).toHaveCount(0);
 });

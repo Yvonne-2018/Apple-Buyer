@@ -248,3 +248,80 @@ test("dev command serves real source tasks, hot updates, and releases its worksp
     0,
   );
 });
+
+test("real template endpoints preserve account boundaries, revisions and settings across restart", async ({
+  page,
+}) => {
+  await page.goto(launchUrl);
+  const call = async (command: string, data: object, expected = 200) => {
+    const response = await page.request.post(
+      new URL(`/api/${command}`, launchUrl).href,
+      {
+        headers: {
+          Authorization: `Bearer ${new URLSearchParams(new URL(launchUrl).hash.slice(1)).get("access")}`,
+          Origin: new URL(launchUrl).origin,
+        },
+        data,
+      },
+    );
+    expect(response.status()).toBe(expected);
+    return response.json();
+  };
+  const a = await call("add_account", { email: "template-a@example.test" });
+  const b = await call("add_account", { email: "template-b@example.test" });
+  const source = await call("template_source", { accountId: a.id });
+  expect(source.address.street).toBe("测试路 8 号");
+  const saved = await call("save_template", {
+    accountId: a.id,
+    isDefault: true,
+    template: {
+      schema_version: 1,
+      name: "持久化模板",
+      sku: "MLH74FE",
+      quantity: 1,
+      max_total: "200",
+      pickup: { city: "成都", store: "R580", store_ids: ["R580", "R502"] },
+      ...source,
+    },
+  });
+  const original = saved.templates[0];
+  expect(saved.default_id).toBe(original.id);
+  expect((await call("list_templates", { accountId: b.id })).templates).toEqual(
+    [],
+  );
+  await call(
+    "delete_template",
+    { accountId: b.id, templateId: original.id },
+    400,
+  );
+  await call(
+    "save_template",
+    { accountId: b.id, template: original, isDefault: false },
+    400,
+  );
+  await call("save_template", {
+    accountId: a.id,
+    template: { ...original, name: "已更新" },
+    isDefault: true,
+  });
+  await call(
+    "save_template",
+    { accountId: a.id, template: original, isDefault: true },
+    400,
+  );
+  await page.goto("about:blank");
+  await stop();
+  await start();
+  await page.goto(launchUrl);
+  const restored = await call("list_templates", { accountId: a.id });
+  expect(restored.templates[0].name).toBe("已更新");
+  expect(restored.templates[0].revision).toBe(2);
+  expect(restored.templates[0].pickup.store_ids).toEqual(["R580", "R502"]);
+  expect(restored.templates[0].contact.fullDaytimePhone).toBe("13800000000");
+  await call("delete_template", { accountId: a.id, templateId: original.id });
+  expect((await call("list_templates", { accountId: a.id })).templates).toEqual(
+    [],
+  );
+  await call("remove_account", { accountId: a.id });
+  await call("remove_account", { accountId: b.id });
+});

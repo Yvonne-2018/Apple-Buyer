@@ -34,7 +34,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "macOS": { "minimumSystemVersion": "12.0" },
+    "macOS": { "minimumSystemVersion": "12.0", "signingIdentity": "-" },
     "windows": {
       "nsis": {
         "displayLanguageSelector": true,

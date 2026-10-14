@@ -62,3 +62,17 @@ Windows 和 Intel macOS 的构建工作流已配置。只有实际相应 runner 
 前端使用 Hash 路由 `#/settings` 与 `#/duo`，桌面和 Web 共用。公开任务使用保留的 nil UUID 表示本地工作空间，不进入 Apple 账号目录；Rust 和 worker 都只允许该作用域执行匿名 catalog 和本地 address_read/address_save。任务及模板保存在 `settings/`，不读取其他账号 Cookie，不触发登录。Web 的本机访问令牌和来源校验仍生效。
 
 通用购买预设通过 `save_preset` 写入 `settings/purchase.json`；通用地址写入 `settings/checkout.json`。新增账号创建时复制预设，已有账号不跟随模板变化。账号专用设置仍写自己的目录。DUO 页面复用原 `query_duo` 解析器，SKU 预制数据仅做默认展示和快捷选择，实时失败与未返回 SKU 均不推断库存。
+
+## 按账号保存的下单模板
+
+下单模板使用独立的 `accounts/<uuid>/order-templates.json`，格式版本 `schema_version: 1`，包含模板列表、默认模板 ID 和逐模板 revision。旧 `purchase.json` / `checkout.json` 的格式不变；导入仅复制购买参数和联系人、地区、地址字段，不导入密码或会话。文件沿用原子写入和私有权限，未知格式版本拒绝读取，过期 revision 拒绝覆盖。
+
+桌面 IPC 与本地 Web 共用 `list_templates`、`template_source`、`save_template`、`delete_template`。`start_task(purchase, {template_id})` 在 Rust 中读取当前账号保存的模板，固定快照后排队；浏览器不能直接提供 `order_template` 覆盖后端模板。同账号已有下单任务时拒绝再次发起模板订单。
+
+worker 的 `order_template.TemplatePolicy` 在登录或网络操作前校验完整配置。执行时将联系人和地址写入当前任务的 `template-checkout.json`，不修改账号原有快捷地址。业务选择由结构化字段确定：收货方式、地址来源、官网完整地址匹配、配送服务策略与累计运费上限、门店和取货时间、发票、SKU 替代白名单与订单总额上限。地址 ID、库存和带签名的时段仅取自当前官网响应。
+
+`worker/data/apple-retail-cn.json` 为前端和 worker 共用的中国大陆直营店目录，随两种发行包内置。`pickup.store_ids` 是有顺序的门店编号数组，后端校验编号存在、无重复且属于配置城市；旧 `pickup.store` 单门店仍可读取执行。新多门店流程先尝试原 SKU 的门店次序，全部不可用才使用 SKU 白名单；接口失败、未知可选状态和签名异常停止，只有已知不可取状态才切换。详见 `docs/PICKUP_STORES.md`。
+
+模板模式下未覆盖的业务 `text/select/confirm` 一律失败并指明配置缺口，不退回默认选择或交互；Apple 登录密码与临时验证码仍通过原有认证通道。模板总额允许包含符合运费上限的配送费用；复核仍要求商品、数量、支付宝、收货安排及总额通过校验。订单提交和支付二维码恢复沿用原有单次提交规则。
+
+本地验证采用临时账号目录和合成官网模型，不对真实账号发起加购、下单或支付。模拟结果不能作为 Apple 实际库存、真实交易成功或下单耗时的证明。

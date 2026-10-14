@@ -840,12 +840,12 @@ def reauthenticate_checkout(flow):
 
 def checkout_delivery(flow):
     from checkout_options import fulfillment
-    fulfillment(flow, ROOT / "checkout.json")
+    fulfillment(flow, getattr(interaction.handler, 'checkout', ROOT / "checkout.json"))
 
 
 def checkout_shipping(flow):
     from checkout_options import shipping
-    shipping(flow, ROOT / "checkout.json", AUTH_PATH)
+    shipping(flow, getattr(interaction.handler, 'checkout', ROOT / "checkout.json"), AUTH_PATH)
 
 
 def model_item_nodes(model):
@@ -915,6 +915,8 @@ def confirm_order(model, *, auto_limit=None, verified_store=None):
     print(f"\n总支付：{total}")
     if auto_limit is not None:
         if yuan_amount(total) > auto_limit:
+            if getattr(interaction.handler, 'template_policy', None):
+                raise ValueError("订单总额超过模板金额上限，未提交订单。")
             raise ValueError("复核金额超过开始结账时的商品金额，自动下单已停止。")
         interaction.report_stage(f"商品、数量及金额自动复核通过：{total}，立即提交订单")
         return
@@ -997,6 +999,9 @@ def pay_bag(*, flow=None):
             if not expected:
                 raise ValueError("购物袋为空，无法下单。")
             preferences = getattr(interaction.handler, 'checkout_preferences', {}) or {}
+            policy = getattr(interaction.handler, 'template_policy', None)
+            if policy:
+                policy.shipping_fee = Decimal(0)
             auto_limit = None
             if preferences.get('auto_submit') is True or preferences.get('fallback_configurations') is True:
                 target = getattr(flow, 'purchase_target', None)
@@ -1007,6 +1012,10 @@ def pay_bag(*, flow=None):
                                      for item in model_item_nodes(cart.get('items', {})))
                     if getattr(flow, 'replacement_price_limit', None) is not None:
                         auto_limit = min(auto_limit, flow.replacement_price_limit)
+                    if policy:
+                        if auto_limit > policy.max_total:
+                            raise ValueError('购物袋商品金额超过模板总额上限，未开始结账。')
+                        auto_limit = policy.max_total
             data = {"shoppingCart.locationConsent.locationConsent": "false",
                     "shoppingCart.summary.promoCode.promoCode": field(cart, "summary.promoCode.d.promoCode", ""),
                     "shoppingCart.actions.fcscounter": "", "shoppingCart.actions.fcsdata": "",
@@ -1045,6 +1054,10 @@ def pay_bag(*, flow=None):
             verified_store = getattr(flow, 'verified_pickup_store', None)
             if auto_limit is not None and preferences.get('mode') == 'RETAIL' and not verified_store:
                 raise ValueError('自动下单尚未验证指定门店，已停止。')
+            if preferences.get('store_ids') and verified_store not in preferences['store_ids']:
+                raise ValueError('实际自提门店不在所选门店列表内，未提交订单。')
+            if policy:
+                policy.verify_fulfillment(flow)
             confirm_order(flow.model, auto_limit=auto_limit, verified_store=verified_store)
             save_auth(session)
             interaction.report_stage("正在提交订单", order_submitted=True)
@@ -1065,6 +1078,10 @@ def pay_bag(*, flow=None):
 def pay_with_alternatives(flow, requested, quantity):
     from variant_fallback import PickupUnavailable, fetch_variants, choose_available, replace_cart
     preferences = getattr(interaction.handler, 'checkout_preferences', {}) or {}
+    policy = getattr(interaction.handler, 'template_policy', None)
+    def load_candidates():
+        rows = fetch_variants(request_get, requested)
+        return policy.filter_candidates(rows) if policy else rows
     if not preferences.get('fallback_configurations'):
         return pay_bag(flow=flow)
     candidates, attempted, current, replacement = None, set(), requested, None
@@ -1077,24 +1094,37 @@ def pay_with_alternatives(flow, requested, quantity):
             return result
         except PickupUnavailable as error:
             attempted.add(current)
-            interaction.report_stage(f'{current} 在 {error.store_id} 不可取货，正在查找同机型其他配置')
+            store_ids = preferences.get('store_ids') or [error.store_id]
+            interaction.report_stage(f'{current} 在所选门店不可取货，正在查找同机型其他配置')
             if candidates is None:
-                candidates = fetch_variants(request_get, requested)
+                candidates = load_candidates()
             replacement = None
-            for attempt in release_wait.attempts(30):
-                replacement = choose_available(flow.session, request_get, candidates, error.store_id, attempted)
+            replacement_attempts = 1 if policy or preferences.get('store_ids') else 30
+            for attempt in release_wait.attempts(replacement_attempts):
+                if preferences.get('store_ids'):
+                    # 保持 SKU 优先、门店次序优先；每家门店批量查询，减少请求。
+                    remaining = [row for row in candidates if row['sku'] not in attempted]
+                    for store_id in store_ids:
+                        earlier = remaining[:remaining.index(replacement)] if replacement else remaining
+                        if not earlier:
+                            break
+                        found = choose_available(flow.session, request_get, earlier, store_id, set())
+                        if found:
+                            replacement = found
+                else:
+                    replacement = choose_available(flow.session, request_get, candidates, error.store_id, attempted)
                 if replacement:
                     break
                 if release_wait.enabled():
                     release_wait.pause('同机型暂无可取配置，等待门店库存更新')
                     attempted.clear()
-                    candidates = fetch_variants(request_get, requested)
+                    candidates = load_candidates()
                 elif not any(row['sku'] not in attempted for row in candidates):
                     break
-                elif attempt < 29:
+                elif attempt < replacement_attempts - 1:
                     release_wait.pause(f'同机型暂无其他可取配置，已刷新 {attempt + 1} 次')
             if replacement is None:
-                raise ValueError('指定门店没有可确认的同机型替代配置，已停止，未提交订单。') from None
+                raise ValueError('所选门店没有可确认的同机型替代配置，已停止，未提交订单。') from None
             interaction.report_stage(f"自动换配置：{current} → {replacement['sku']}；"
                                      f"{replacement['name']} × {quantity}，参考总价 RMB {Decimal(replacement['price']) * quantity}")
             if current != replacement['sku']:
@@ -1103,8 +1133,8 @@ def pay_with_alternatives(flow, requested, quantity):
             flow.purchase_target = (current, quantity)
             flow.replacement_price_limit = Decimal(replacement['price']) * quantity
             flow.verified_pickup_store = None
-            # Pin the ID resolved by the actual checkout; never migrate to a nearby store.
-            preferences['store'] = error.store_id
+            # 多门店保持用户原次序，旧单门店固定官网解析到的编号。
+            preferences['store'] = store_ids[0]
     raise ValueError('可尝试配置已耗尽，未提交订单。')
 
 

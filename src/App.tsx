@@ -32,6 +32,9 @@ import { AccountGate } from "./AccountGate";
 import { RemoveAccountDialog } from "./RemoveAccountDialog";
 import { SelectField } from "./SelectField";
 import { ActiveTaskNav } from "./ActiveTaskNav";
+import { OrderTemplates } from "./OrderTemplates";
+import { PickupStoreSelect } from "./PickupStoreSelect";
+import { selectedStoreIds } from "./retailStores";
 import {
   active,
   LOCAL_ID,
@@ -99,9 +102,11 @@ export default function App() {
   );
   const [pickupCity, setPickupCity] = useState("");
   const [pickupStore, setPickupStore] = useState("");
+  const [pickupStoreIds, setPickupStoreIds] = useState<string[]>([]);
   const [autoSubmit, setAutoSubmit] = useState(true);
   const [waitForRelease, setWaitForRelease] = useState(true);
   const [fallbackConfigurations, setFallbackConfigurations] = useState(true);
+  const [preferTemplates, setPreferTemplates] = useState(false);
   useEffect(() => {
     if (!accountId || loadedPurchaseAccount !== accountId) return;
     try {
@@ -113,6 +118,7 @@ export default function App() {
           mode: fulfillmentMode,
           city: pickupCity,
           store: pickupStore,
+          store_ids: pickupStoreIds,
           autoSubmit,
           fallbackConfigurations,
           waitForRelease,
@@ -129,6 +135,7 @@ export default function App() {
     fulfillmentMode,
     pickupCity,
     pickupStore,
+    pickupStoreIds,
     autoSubmit,
     fallbackConfigurations,
     waitForRelease,
@@ -206,6 +213,13 @@ export default function App() {
     setFulfillmentMode(saved.mode === "RETAIL" ? "RETAIL" : "HOME");
     setPickupCity(String(saved.city || ""));
     setPickupStore(String(saved.store || ""));
+    setPickupStoreIds(
+      selectedStoreIds({
+        city: String(saved.city || ""),
+        store: String(saved.store || ""),
+        store_ids: saved.store_ids,
+      }),
+    );
     setAutoSubmit(saved.autoSubmit !== false);
     setFallbackConfigurations(saved.fallbackConfigurations !== false);
     setWaitForRelease(saved.waitForRelease !== false);
@@ -638,159 +652,175 @@ export default function App() {
                           <h2>购买商品</h2>
                           <span>按目标总数量更新</span>
                         </div>
-                        <form
-                          onSubmit={(e) => {
-                            e.preventDefault();
-                            start("purchase", {
-                              sku,
-                              quantity,
-                              checkout_preferences: {
-                                mode: fulfillmentMode,
-                                city: pickupCity.trim(),
-                                store: pickupStore.trim(),
-                                auto_submit: autoSubmit,
-                                wait_for_release: waitForRelease,
-                                fallback_configurations:
-                                  fulfillmentMode === "RETAIL" &&
-                                  fallbackConfigurations,
-                              },
-                            });
+                        <OrderTemplates
+                          key={account.id}
+                          account={account}
+                          bridge={bridge!}
+                          busy={busy}
+                          purchase={{
+                            sku,
+                            quantity,
+                            mode: fulfillmentMode,
+                            city: pickupCity,
+                            store: pickupStore,
+                            store_ids: pickupStoreIds,
+                            waitForRelease,
                           }}
+                          onRun={(templateId) =>
+                            start("purchase", { template_id: templateId })
+                          }
+                          onTemplateViewChange={setPreferTemplates}
+                        />
+                        <details
+                          className="legacy-purchase"
+                          open={!preferTemplates}
                         >
-                          <ProductSelect sku={sku} onChange={setSku} />
-                          <div className="buy-fields">
-                            <label>
-                              商品 SKU
-                              <input
-                                required
-                                value={sku}
-                                onChange={(e) =>
-                                  setSku(e.target.value.toUpperCase())
-                                }
-                                placeholder="MK2U4CH"
-                              />
-                            </label>
-                            <label>
-                              数量
-                              <input
-                                type="number"
-                                required
-                                min={1}
-                                max={999}
-                                value={quantity}
-                                onChange={(e) =>
-                                  setQuantity(Number(e.target.value))
-                                }
-                              />
-                            </label>
-                          </div>
-                          <div className="buy-fields checkout-fields">
-                            <label>
-                              收货方式
-                              <select
-                                value={fulfillmentMode}
-                                onChange={(e) =>
-                                  setFulfillmentMode(
-                                    e.target.value as "HOME" | "RETAIL",
-                                  )
-                                }
-                              >
-                                <option value="RETAIL">门店自提</option>
-                                <option value="HOME">送货上门</option>
-                              </select>
-                            </label>
-                            <label>
-                              支付方式
-                              <input
-                                value="支付宝（默认）"
-                                readOnly
-                                aria-label="支付方式"
-                              />
-                            </label>
-                          </div>
-                          {fulfillmentMode === "RETAIL" && (
-                            <div className="buy-fields checkout-fields">
+                          <summary>临时购买 · 使用原有配置</summary>
+                          <form
+                            onSubmit={(e) => {
+                              e.preventDefault();
+                              start("purchase", {
+                                sku,
+                                quantity,
+                                checkout_preferences: {
+                                  mode: fulfillmentMode,
+                                  city: pickupCity.trim(),
+                                  store: pickupStore.trim(),
+                                  store_ids:
+                                    fulfillmentMode === "RETAIL"
+                                      ? pickupStoreIds
+                                      : [],
+                                  auto_submit: autoSubmit,
+                                  wait_for_release: waitForRelease,
+                                  fallback_configurations:
+                                    fulfillmentMode === "RETAIL" &&
+                                    fallbackConfigurations,
+                                },
+                              });
+                            }}
+                          >
+                            <ProductSelect sku={sku} onChange={setSku} />
+                            <div className="buy-fields">
                               <label>
-                                提货城市或地区
+                                商品 SKU
                                 <input
                                   required
-                                  value={pickupCity}
+                                  value={sku}
                                   onChange={(e) =>
-                                    setPickupCity(e.target.value)
+                                    setSku(e.target.value.toUpperCase())
                                   }
-                                  placeholder="例如：上海"
+                                  placeholder="MK2U4CH"
                                 />
                               </label>
                               <label>
-                                指定提货门店
+                                数量
                                 <input
-                                  required={
-                                    autoSubmit || fallbackConfigurations
-                                  }
-                                  value={pickupStore}
+                                  type="number"
+                                  required
+                                  min={1}
+                                  max={999}
+                                  value={quantity}
                                   onChange={(e) =>
-                                    setPickupStore(e.target.value)
+                                    setQuantity(Number(e.target.value))
                                   }
-                                  placeholder="门店名称或编号；留空时结账中选择"
                                 />
                               </label>
                             </div>
-                          )}
-                          <label>
-                            <input
-                              type="checkbox"
-                              checked={waitForRelease}
-                              onChange={(e) =>
-                                setWaitForRelease(e.target.checked)
-                              }
-                            />
-                            等待上架 / 到货（每次查询结束后 2
-                            秒刷新，持续等待直到可购买或取消）
-                          </label>
-                          {fulfillmentMode === "RETAIL" && (
+                            <div className="buy-fields checkout-fields">
+                              <label>
+                                收货方式
+                                <select
+                                  value={fulfillmentMode}
+                                  onChange={(e) =>
+                                    setFulfillmentMode(
+                                      e.target.value as "HOME" | "RETAIL",
+                                    )
+                                  }
+                                >
+                                  <option value="RETAIL">门店自提</option>
+                                  <option value="HOME">送货上门</option>
+                                </select>
+                              </label>
+                              <label>
+                                支付方式
+                                <input
+                                  value="支付宝（默认）"
+                                  readOnly
+                                  aria-label="支付方式"
+                                />
+                              </label>
+                            </div>
+                            {fulfillmentMode === "RETAIL" && (
+                              <PickupStoreSelect
+                                city={pickupCity}
+                                storeIds={pickupStoreIds}
+                                legacyStore={pickupStore}
+                                onChange={(city, ids) => {
+                                  setPickupCity(city);
+                                  setPickupStoreIds(ids);
+                                  setPickupStore(ids[0] || "");
+                                }}
+                              />
+                            )}
                             <label>
                               <input
                                 type="checkbox"
-                                checked={fallbackConfigurations}
+                                checked={waitForRelease}
                                 onChange={(e) =>
-                                  setFallbackConfigurations(e.target.checked)
+                                  setWaitForRelease(e.target.checked)
                                 }
                               />
-                              无货时自动换同机型配置（容量、颜色不限，允许更贵）
+                              等待上架 / 到货（每次查询结束后 2
+                              秒刷新，持续等待直到可购买或取消）
                             </label>
-                          )}
-                          <label>
-                            <input
-                              type="checkbox"
-                              checked={autoSubmit}
-                              onChange={(e) => setAutoSubmit(e.target.checked)}
-                            />
-                            自动提交订单（默认）
-                          </label>
-                          <p className="muted">
-                            自动使用已保存的提货人、最早可取时段和支付宝。自动模式仅提交指定
-                            SKU
-                            与数量，最终金额不得超过实际选定配置的核验金额；校验通过后不再弹出确认，完成后等待付款。购物袋其他商品会自动移除，仅保留本次目标商品并核对数量。开启换配置后，原
-                            SKU
-                            无货时优先同容量换色，再选其他容量；门店和数量不变，金额按替代配置重新核对。购买配置自动记住。
-                          </p>
-                          <div className="button-row">
-                            <button
-                              className="primary"
-                              type="submit"
-                              disabled={
-                                busy ||
-                                !sku.trim() ||
-                                quantity < 1 ||
-                                (fulfillmentMode === "RETAIL" &&
-                                  !pickupCity.trim())
-                              }
-                            >
-                              立即下单
-                              <ArrowRight size={16} />
-                            </button>
-                          </div>
-                        </form>
+                            {fulfillmentMode === "RETAIL" && (
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  checked={fallbackConfigurations}
+                                  onChange={(e) =>
+                                    setFallbackConfigurations(e.target.checked)
+                                  }
+                                />
+                                无货时自动换同机型配置（容量、颜色不限，允许更贵）
+                              </label>
+                            )}
+                            <label>
+                              <input
+                                type="checkbox"
+                                checked={autoSubmit}
+                                onChange={(e) =>
+                                  setAutoSubmit(e.target.checked)
+                                }
+                              />
+                              自动提交订单（默认）
+                            </label>
+                            <p className="muted">
+                              自动使用已保存的提货人、最早可取时段和支付宝。自动模式仅提交指定
+                              SKU
+                              与数量，最终金额不得超过实际选定配置的核验金额；校验通过后不再弹出确认，完成后等待付款。购物袋其他商品会自动移除，仅保留本次目标商品并核对数量。开启换配置后，原
+                              SKU
+                              在所选门店全部无货时优先同容量换色，再选其他容量，每个配置均按门店顺序尝试；数量不变，金额按替代配置重新核对。购买配置自动记住。
+                            </p>
+                            <div className="button-row">
+                              <button
+                                className="primary"
+                                type="submit"
+                                disabled={
+                                  busy ||
+                                  !sku.trim() ||
+                                  quantity < 1 ||
+                                  (fulfillmentMode === "RETAIL" &&
+                                    (!pickupCity.trim() ||
+                                      !pickupStoreIds.length))
+                                }
+                              >
+                                立即下单
+                                <ArrowRight size={16} />
+                              </button>
+                            </div>
+                          </form>
+                        </details>
                       </section>
                     </>
                   )}
@@ -1199,6 +1229,13 @@ function Result({
     return (
       <div className="payment">
         <h3>订单已创建，等待付款</h3>
+        {result.template_name && (
+          <p className="muted">
+            模板：{result.template_name}
+            {typeof result.elapsed_ms === "number" &&
+              ` · 用时 ${(result.elapsed_ms / 1000).toFixed(1)} 秒`}
+          </p>
+        )}
         <p>
           订单 {result.order_number || "请查询订单确认"}
           {result.amount_due && ` · ${result.amount_due}`}

@@ -11,6 +11,7 @@ backend = 'keyring.backends.Windows' if sys.platform == 'win32' else 'keyring.ba
 subprocess.run([str(python), '-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir',
     '--name', 'duo-killer-worker', '--distpath', str(root/'worker/dist'), '--workpath', str(root/'worker/build'),
     '--specpath', str(root/'worker/build'), '--paths', str(root/'worker/legacy'),
+    '--add-data', str(root/'worker/data') + ':data',
     '--collect-all', 'playwright', '--collect-data', 'tzdata', '--hidden-import', backend,
     '--hidden-import', 'srp._pysrp', '--hidden-import', 'qrcode.image.pure',
     str(root/'worker/main.py')], cwd=root, check=True)
