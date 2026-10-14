@@ -7,7 +7,10 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
-const output = join(root, "docs/videos/template-checkout-demo.mp4");
+const output = join(
+  root,
+  "artifacts/demo-recording/template-checkout-demo-silent.mp4",
+);
 const images = join(root, "docs/images");
 const rawDir = join(root, "artifacts/demo-recording");
 await Promise.all([
@@ -470,7 +473,10 @@ try {
     join(rawDir, "chapters.json"),
     JSON.stringify(chapters, null, 2) + "\n",
   );
-  console.log(`视频已生成：${output}`);
+  console.log(`原始录屏已生成：${output}`);
+  execFileSync(python, [join(root, "scripts/voice_demo.py")], {
+    stdio: "inherit",
+  });
 } finally {
   await context?.close();
   await browser?.close();

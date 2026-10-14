@@ -21,6 +21,7 @@
     "test:web:ui": "playwright test --config playwright.web.config.ts",
     "dev:web": "node scripts/dev-web.mjs",
     "demo:record": "node scripts/record_demo.mjs",
+    "demo:voice": "node scripts/python.mjs scripts/voice_demo.py",
     "test:dev:web": "playwright test --config playwright.web.config.ts dev.spec.ts"
   },
   "dependencies": {
