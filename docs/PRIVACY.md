@@ -21,15 +21,15 @@
 
 **现有 Rust 可执行文件包含构建时的本机用户名路径。**它们不是账号密码或会话 Cookie，但能暴露构建机器的用户名，因此现有产物不能称为完全去标识化。
 
-- `local-web-release/duo-killer-web`
-- `src-tauri/target/release/bundle/macos/DUO Killer.app/Contents/MacOS/duo-killer`
+- `local-web-release/apple-buyer-web`
+- `src-tauri/target/release/bundle/macos/Apple-Buyer.app/Contents/MacOS/apple-buyer`
 - 旧名称 app 里的同类可执行文件也存在此信息。
 
 部分第三方原生依赖还带有其构建机器的路径。当前发布构建尚未配置 Rust 路径映射；若要分发完全去标识化的版本，需要配置后重新构建和检查。不要直接压缩整个开发目录，里面还包含构建缓存和测试产物。
 
 ## 正常运行会保存哪些信息
 
-账号数据默认在系统应用数据目录中，桌面、正式 Web、开发 Web 分别使用 `com.niulai.desktop`、`com.niulai.local-web`、`com.niulai.local-web-dev`。DUO Killer 改名后继续保留这些标识及原系统钥匙串服务名，以兼容已保存的账号、设备信任和配置；它们不是界面显示名。
+账号数据默认在系统应用数据目录中，桌面、正式 Web、开发 Web 分别使用 `com.niulai.desktop`、`com.niulai.local-web`、`com.niulai.local-web-dev`。Apple-Buyer 改名后继续保留这些标识及原系统钥匙串服务名，以兼容已保存的账号、设备信任和配置；它们不是界面显示名。
 
 | 文件                          | 可能包含的信息             |
 | ----------------------------- | -------------------------- |

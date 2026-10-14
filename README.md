@@ -1,10 +1,12 @@
-# DUO Killer · iPhone DUO 抢购辅助与 Apple 商城快速下单
+# Apple-Buyer · Apple 商城快速下单
 
 面向 **iPhone DUO 抢购准备与快速下单** 的 Apple 中国在线商店辅助工具，支持 **Mac M 系列、Windows 64 位和本地 Web**。提前保存账号和下单模板，配置商品、数量、预算、联系人、配送或自提安排，一键执行到支付宝付款二维码，最后由本人扫码支付并查询订单。
 
 iPhone DUO launch assistant and Apple Store quick checkout tool for macOS, Windows and local Web. Built with Tauri, Rust, React and Python.
 
-## 本次更新（2026-10-14）
+## 本次更新（2026-10-15）
+
+- **项目统一更名为 Apple-Buyer**：GitHub 仓库、界面左上角、窗口标题、应用及安装包名称同步调整；继续使用原有应用数据目录，保留已保存的账号、模板与设备信任。
 
 - **账号独立的下单模板**：新建、编辑、复制、删除、默认模板、草稿及从现有配置导入。完整模板保存后，正常下单过程无需重复输入业务信息，直接到付款码。
 - **自提城市与门店列表**：内置 Apple 中国大陆官方目录的 25 个城市、49 家直营店；选择城市后可多选门店、调整优先顺序。当前门店不可取货时自动尝试下一家，仅使用所选门店。
@@ -49,12 +51,12 @@ iPhone DUO launch assistant and Apple Store quick checkout tool for macOS, Windo
 
 普通使用者可直接下载安装包，安装后无需准备 Python、Node 或 Rust 开发环境。
 
-| 系统                    | GitHub 构建产物        | 安装方法                                       |
-| ----------------------- | ---------------------- | ---------------------------------------------- |
-| Mac M 系列芯片（arm64） | `duo-killer-mac-arm64` | 解压下载的 ZIP，打开 DMG，将应用拖入“应用程序” |
-| Windows 64 位（x64）    | `duo-killer-win-x64`   | 解压下载的 ZIP，双击 `-setup.exe` 按向导安装   |
+| 系统                    | GitHub 构建产物         | 安装方法                                       |
+| ----------------------- | ----------------------- | ---------------------------------------------- |
+| Mac M 系列芯片（arm64） | `Apple-Buyer-mac-arm64` | 解压下载的 ZIP，打开 DMG，将应用拖入“应用程序” |
+| Windows 64 位（x64）    | `Apple-Buyer-win-x64`   | 解压下载的 ZIP，双击 `-setup.exe` 按向导安装   |
 
-[本次已通过的双平台构建与下载入口](https://github.com/Yvonne-2018/iPhoneDuo/actions/runs/38585410102) · [全部桌面构建](https://github.com/Yvonne-2018/iPhoneDuo/actions/workflows/build.yml)
+[Apple-Buyer 双平台构建与下载入口](https://github.com/Yvonne-2018/Apple-Buyer/actions/workflows/build.yml)
 
 在构建详情页底部 **Artifacts** 选择对应系统，产物保留 30 天。当前 Mac 使用临时签名、未做 Developer ID 公证，Windows 未配置发行证书，首次打开可能出现系统提示；具体说明见下方构建章节。
 
@@ -75,8 +77,8 @@ Web 版不是在线网站。首次登录获取浏览器上下文时，需要安�
 克隆仓库后启动：
 
 ```sh
-git clone https://github.com/Yvonne-2018/iPhoneDuo.git
-cd iPhoneDuo
+git clone https://github.com/Yvonne-2018/Apple-Buyer.git
+cd Apple-Buyer
 pnpm install --frozen-lockfile
 pnpm dev:web
 ```
@@ -166,7 +168,7 @@ pnpm worker:build
 pnpm bundle
 ```
 
-输出：`src-tauri/target/release/bundle/dmg/*.dmg`，以及 `src-tauri/target/release/bundle/macos/DUO Killer.app`。
+输出：`src-tauri/target/release/bundle/dmg/Apple-Buyer_0.1.0_aarch64.dmg`，以及 `src-tauri/target/release/bundle/macos/Apple-Buyer.app`。
 
 当前构建使用本地临时签名（ad hoc），未配置 Developer ID 发行签名和公证。若首次打开提示无法验证开发者，确认来源可信后，先尝试打开一次，再到 **系统设置 → 隐私与安全性 → 仍要打开**，确认“打开”。此方法针对未认证开发者提示；不要忽略恶意软件或损坏警告。参见 [Apple 官方说明](https://support.apple.com/zh-cn/102445)。
 
@@ -181,14 +183,14 @@ pnpm worker:build
 pnpm bundle
 ```
 
-输出：`src-tauri/target/release/bundle/nsis/*-setup.exe`。分享此安装程序即可，已包含 Python worker 与门店目录，安装后无需另装 Python、Node 或 Rust。当前没有 Windows 发行证书，系统可能显示未知发布者提示。
+输出：`src-tauri/target/release/bundle/nsis/Apple-Buyer_0.1.0_x64-setup.exe`。分享此安装程序即可，已包含 Python worker 与门店目录，安装后无需另装 Python、Node 或 Rust。当前没有 Windows 发行证书，系统可能显示未知发布者提示。
 
 ### GitHub 自动打包
 
-在 [GitHub Actions](https://github.com/Yvonne-2018/iPhoneDuo/actions/workflows/build.yml) 中选择 **Desktop packages → Run workflow**，或推送 `v*` 标签。仅生成：
+在 [GitHub Actions](https://github.com/Yvonne-2018/Apple-Buyer/actions/workflows/build.yml) 中选择 **Desktop packages → Run workflow**，或推送 `v*` 标签。仅生成：
 
-- **duo-killer-mac-arm64**：适用于 Mac M 系列芯片的 DMG。
-- **duo-killer-win-x64**：适用于 Windows 64 位的 EXE 安装程序。
+- **Apple-Buyer-mac-arm64**：`Apple-Buyer_0.1.0_aarch64.dmg`，适用于 Mac M 系列芯片。
+- **Apple-Buyer-win-x64**：`Apple-Buyer_0.1.0_x64-setup.exe`，适用于 Windows 64 位。
 
 每个平台先执行 worker、Rust、界面测试，再构建安装包并检查内置 worker。Windows runner 还会静默安装，核对主程序和内置 worker。构建成功后在本次运行的 **Artifacts** 下载；GitHub 会将产物打成 ZIP，解压后使用里面的 DMG 或 EXE。产物保留 30 天。当前不构建 Intel Mac，不自动生成 Web 包，也不自动发布 GitHub Release。Web 工作流保留手动运行入口。
 

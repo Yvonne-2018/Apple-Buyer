@@ -44,7 +44,7 @@ def main():
         subprocess.run([pnpm, 'exec', 'vite', 'build', '--mode', 'local-web', '--outDir', str(staging / 'www'), '--emptyOutDir'], cwd=ROOT, check=True)
         backend = 'keyring.backends.Windows' if os.name == 'nt' else 'keyring.backends.macOS'
         subprocess.run([str(python), '-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir',
-                        '--name', 'duo-killer-worker', '--distpath', str(staging / 'python-dist'),
+                        '--name', 'apple-buyer-worker', '--distpath', str(staging / 'python-dist'),
                         '--workpath', str(ROOT / 'local-web/target/python-build'),
                         '--specpath', str(ROOT / 'local-web/target/python-build'),
                         '--paths', str(ROOT / 'worker/legacy'),
@@ -52,18 +52,18 @@ def main():
                         '--collect-data', 'tzdata', '--hidden-import', backend,
                         '--hidden-import', 'srp._pysrp', '--hidden-import', 'qrcode.image.pure',
                         str(ROOT / 'worker/main.py')], cwd=ROOT, check=True)
-        (staging / 'python-dist/duo-killer-worker').rename(staging / 'worker')
+        (staging / 'python-dist/apple-buyer-worker').rename(staging / 'worker')
         (staging / 'python-dist').rmdir()
-        executable = 'duo-killer-web.exe' if os.name == 'nt' else 'duo-killer-web'
+        executable = 'apple-buyer-web.exe' if os.name == 'nt' else 'apple-buyer-web'
         shutil.copy2(ROOT / 'local-web/target/release' / executable, staging / executable)
         if os.name == 'nt':
-            (staging / 'start.cmd').write_bytes(b'@echo off\r\ncd /d "%~dp0"\r\nduo-killer-web.exe\r\nif errorlevel 1 pause\r\n')
+            (staging / 'start.cmd').write_bytes(b'@echo off\r\ncd /d "%~dp0"\r\napple-buyer-web.exe\r\nif errorlevel 1 pause\r\n')
         else:
             launcher = staging / '启动.command'
-            launcher.write_text('#!/bin/sh\ncd -- "$(dirname -- "$0")" || exit 1\n./duo-killer-web\n', encoding='utf-8')
+            launcher.write_text('#!/bin/sh\ncd -- "$(dirname -- "$0")" || exit 1\n./apple-buyer-web\n', encoding='utf-8')
             launcher.chmod(0o755)
         (staging / '使用说明.txt').write_text(
-            'DUO Killer · 本地 Web\n\n双击启动.command（macOS）或 start.cmd（Windows），自动打开默认浏览器。\n'
+            'Apple-Buyer · 本地 Web\n\n双击启动.command（macOS）或 start.cmd（Windows），自动打开默认浏览器。\n'
             '请保留整个目录；内置 Python，无需另外安装运行环境。登录时仍需安装 Chrome 或 Edge。\n'
             '关闭网页不会退出服务；在启动终端按 Ctrl+C 退出。\n'
             '账号数据保存在系统用户目录 com.niulai.local-web 中，与桌面版分开，重新构建不清除。\n'

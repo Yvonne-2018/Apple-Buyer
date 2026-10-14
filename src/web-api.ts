@@ -5,10 +5,11 @@ export function localWebBridge(): Bridge {
   // The launch secret lives in the URL fragment, never a request URL or Referer.
   const access = new URLSearchParams(location.hash.slice(1)).get("access");
   if (access) {
-    sessionStorage.setItem("duo-killer-web-access", access);
+    sessionStorage.setItem("apple-buyer-web-access", access);
     history.replaceState(null, "", location.pathname);
   }
-  const token = access || sessionStorage.getItem("duo-killer-web-access") || "";
+  const token =
+    access || sessionStorage.getItem("apple-buyer-web-access") || "";
   const headers = {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
@@ -23,7 +24,7 @@ export function localWebBridge(): Bridge {
       });
     } catch (error) {
       if (init.signal?.aborted) throw error;
-      throw new Error("本地服务未连接，请先启动DUO Killer本地 Web。");
+      throw new Error("本地服务未连接，请先启动 Apple-Buyer 本地 Web。");
     }
     if (!response.ok) {
       if (response.status === 404) {

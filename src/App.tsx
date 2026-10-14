@@ -358,7 +358,7 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand">
           <span>
-            DUO Killer <small>{isLocalWeb ? "本地 Web" : "桌面版"}</small>
+            Apple-Buyer <small>{isLocalWeb ? "本地 Web" : "桌面版"}</small>
           </span>
         </div>
         <RouteNav route={route} navigate={navigate} />
@@ -524,7 +524,7 @@ export default function App() {
             <FolderLock size={36} />
             <h1>请在桌面应用中打开</h1>
             <p>
-              浏览器预览不会访问你的账号。启动DUO Killer
+              浏览器预览不会访问你的账号。启动 Apple-Buyer
               桌面版后，即可管理本机任务。
             </p>
             <code>pnpm desktop</code>
@@ -1031,7 +1031,7 @@ export default function App() {
           </>
         )}
         <footer className="workspace-footer">
-          <span>DUO Killer · v12（等待加购修复）</span>
+          <span>Apple-Buyer · v0.1.0</span>
           <span>会话与地址按账号独立保存</span>
         </footer>
         {removingAccount && (

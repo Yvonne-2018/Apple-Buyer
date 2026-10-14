@@ -55,22 +55,22 @@ jobs:
       - run: pnpm bundle
       - name: Verify packaged worker in macOS app
         if: runner.os == 'macOS'
-        run: python scripts/smoke_worker.py "src-tauri/target/release/bundle/macos/DUO Killer.app/Contents/Resources/worker/duo-killer-worker"
+        run: python scripts/smoke_worker.py "src-tauri/target/release/bundle/macos/Apple-Buyer.app/Contents/Resources/worker/apple-buyer-worker"
       - name: Verify Windows installer
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe"
           if ($installer.Count -ne 1) { throw 'Expected exactly one Windows installer' }
-          $installDir = Join-Path $env:RUNNER_TEMP 'duo-installed'
+          $installDir = Join-Path $env:RUNNER_TEMP 'apple-buyer-installed'
           $process = Start-Process -FilePath $installer.FullName -ArgumentList @('/S', "/D=$installDir") -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
-          if (-not (Test-Path (Join-Path $installDir 'duo-killer.exe'))) { throw 'Installed application missing' }
-          python scripts/smoke_worker.py (Join-Path $installDir 'worker/duo-killer-worker.exe')
+          if (-not (Test-Path (Join-Path $installDir 'apple-buyer.exe'))) { throw 'Installed application missing' }
+          python scripts/smoke_worker.py (Join-Path $installDir 'worker/apple-buyer-worker.exe')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
-          name: duo-killer-${{ matrix.label }}
+          name: Apple-Buyer-${{ matrix.label }}
           path: ${{ matrix.package }}
           if-no-files-found: error
           retention-days: 30

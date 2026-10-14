@@ -1,8 +1,8 @@
 [package]
-name = "duo-killer"
+name = "apple-buyer"
 version = "0.1.0"
 edition = "2021"
-description = "DUO Killer multi-account desktop client"
+description = "Apple-Buyer multi-account desktop client"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

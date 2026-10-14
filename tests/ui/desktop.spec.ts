@@ -1012,7 +1012,7 @@ test("shared dropdown supports keyboard, dismissal and narrow viewport placement
   await fixture(page);
   await page.goto("/");
   await enterWorkspace(page);
-  await expect(page).toHaveTitle("DUO Killer");
+  await expect(page).toHaveTitle("Apple-Buyer");
   const select = page.getByRole("combobox", { name: "预制商品" });
   await select.focus();
   await select.press("ArrowDown");

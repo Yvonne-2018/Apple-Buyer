@@ -1,4 +1,4 @@
-# DUO Killer
+# Apple-Buyer
 
 为已有 Python 脚本的使用者提供 macOS / Windows 桌面工具，管理多个自己的 Apple 账号，完成登录、选购、配送或自提、订单确认、扫码支付和订单查询。
 

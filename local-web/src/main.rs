@@ -247,9 +247,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         (
             package.join("worker").join(if cfg!(windows) {
-                "duo-killer-worker.exe"
+                "apple-buyer-worker.exe"
             } else {
-                "duo-killer-worker"
+                "apple-buyer-worker"
             }),
             None,
         )
@@ -316,7 +316,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state);
     println!(
-        "DUO Killer · 本地 Web\n{url}\n仅限本机访问。关闭网页后服务仍运行；在此终端按 Ctrl+C 退出。"
+        "Apple-Buyer · 本地 Web\n{url}\n仅限本机访问。关闭网页后服务仍运行；在此终端按 Ctrl+C 退出。"
     );
     if open && open_browser(&url).is_err() {
         eprintln!("无法自动打开默认浏览器，请打开上面的本机链接。");

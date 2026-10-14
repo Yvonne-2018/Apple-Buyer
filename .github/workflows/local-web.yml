@@ -41,5 +41,5 @@ jobs:
         run: tar -czf local-web-${{ matrix.label }}.tar.gz local-web-release
       - uses: actions/upload-artifact@v4
         with:
-          name: duo-killer-local-web-${{ matrix.label }}
+          name: Apple-Buyer-local-web-${{ matrix.label }}
           path: local-web-${{ matrix.label }}.tar.gz

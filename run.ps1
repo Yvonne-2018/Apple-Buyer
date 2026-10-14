@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
-$python = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' } elseif (Get-Command python3 -ErrorAction SilentlyContinue) { 'python3' } else { throw '开发环境需要 Python 3.10+。普通用户请安装 DUO Killer 安装包。' }
+$python = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' } elseif (Get-Command python3 -ErrorAction SilentlyContinue) { 'python3' } else { throw '开发环境需要 Python 3.10+。普通用户请安装 Apple-Buyer 安装包。' }
 if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) { throw '请通过 Corepack 启用 pnpm。' }
 & $python scripts/setup_worker.py
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

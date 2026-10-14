@@ -9,7 +9,7 @@ if not python.exists():
     raise SystemExit('请先运行 python scripts/setup_worker.py。')
 backend = 'keyring.backends.Windows' if sys.platform == 'win32' else 'keyring.backends.macOS'
 subprocess.run([str(python), '-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir',
-    '--name', 'duo-killer-worker', '--distpath', str(root/'worker/dist'), '--workpath', str(root/'worker/build'),
+    '--name', 'apple-buyer-worker', '--distpath', str(root/'worker/dist'), '--workpath', str(root/'worker/build'),
     '--specpath', str(root/'worker/build'), '--paths', str(root/'worker/legacy'),
     '--add-data', str(root/'worker/data') + ':data',
     '--collect-all', 'playwright', '--collect-data', 'tzdata', '--hidden-import', backend,
@@ -18,5 +18,5 @@ subprocess.run([str(python), '-m', 'PyInstaller', '--noconfirm', '--clean', '--o
 destination = root/'src-tauri/resources/worker'
 if destination.exists():
     shutil.rmtree(destination)
-shutil.copytree(root/'worker/dist/duo-killer-worker', destination)
+shutil.copytree(root/'worker/dist/apple-buyer-worker', destination)
 print('已内置 Python 与依赖：', destination)

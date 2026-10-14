@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 root=Path(__file__).resolve().parents[1]
-exe=Path(sys.argv[1]) if len(sys.argv)>1 else root/'src-tauri/resources/worker'/('duo-killer-worker.exe' if sys.platform=='win32' else 'duo-killer-worker')
+exe=Path(sys.argv[1]) if len(sys.argv)>1 else root/'src-tauri/resources/worker'/('apple-buyer-worker.exe' if sys.platform=='win32' else 'apple-buyer-worker')
 with tempfile.TemporaryDirectory() as folder:
     account_id,task_id=str(uuid.uuid4()),str(uuid.uuid4())
     process=subprocess.Popen([str(exe),'--data-dir',folder,'--account-id',account_id,'--task-id',task_id],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding='utf-8')

@@ -113,9 +113,9 @@ fn main() {
                     .resource_dir()?
                     .join("worker")
                     .join(if cfg!(windows) {
-                        "duo-killer-worker.exe"
+                        "apple-buyer-worker.exe"
                     } else {
-                        "duo-killer-worker"
+                        "apple-buyer-worker"
                     }),
                 None,
             );
@@ -143,7 +143,7 @@ fn main() {
             cancel_task
         ])
         .build(tauri::generate_context!())
-        .expect("无法启动 DUO Killer");
+        .expect("无法启动 Apple-Buyer");
     app.run(move |app, event| {
         if let tauri::RunEvent::ExitRequested { api, .. } = event {
             if !closing.swap(true, Ordering::SeqCst) {

@@ -16,7 +16,7 @@ import urllib.request
 
 
 def launch(package, data):
-    executable = package / ('duo-killer-web.exe' if os.name == 'nt' else 'duo-killer-web')
+    executable = package / ('apple-buyer-web.exe' if os.name == 'nt' else 'apple-buyer-web')
     flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
     process = subprocess.Popen([str(executable), '--no-open', '--port', '0', '--data-dir', str(data)],
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -53,7 +53,7 @@ def stop(process):
 
 def main(package):
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with tempfile.TemporaryDirectory(prefix='duo-killer-web-check-') as directory:
+    with tempfile.TemporaryDirectory(prefix='apple-buyer-web-check-') as directory:
         data = Path(directory)
         process, origin, token = launch(package, data)
         try:
@@ -89,7 +89,7 @@ def main(package):
             request('/api/snapshot', {}, {'Authorization': ''}, 401)
             request('/api/add_account', {'email': 'blocked@example.test'}, {'Origin': 'https://foreign.test'}, 403)
             request('/api/snapshot', {}, {'Host': 'rebind.test'}, 403)
-            request('/worker/duo-killer-worker', expected=404)
+            request('/worker/apple-buyer-worker', expected=404)
             request('/../accounts.json', expected=404)
             assert call('snapshot')['accounts'] == []
             a = call('add_account', name='测试 A', email='a@example.test')
@@ -128,7 +128,7 @@ def main(package):
             assert {first, second} <= seen
             assert not (data / 'accounts' / b['id'] / 'checkout.json').exists()
             # Validate the single-workspace lock without sharing live application state.
-            duplicate = subprocess.run([str(package / ('duo-killer-web.exe' if os.name == 'nt' else 'duo-killer-web')),
+            duplicate = subprocess.run([str(package / ('apple-buyer-web.exe' if os.name == 'nt' else 'apple-buyer-web')),
                                         '--no-open', '--port', '0', '--data-dir', str(data)], capture_output=True, timeout=10)
             assert duplicate.returncode != 0
             stop(process)

@@ -8,10 +8,10 @@ let process: ChildProcess;
 let directory: string;
 let launchUrl: string;
 test.beforeAll(async () => {
-  directory = await mkdtemp(join(tmpdir(), "duo-killer-web-ui-"));
+  directory = await mkdtemp(join(tmpdir(), "apple-buyer-web-ui-"));
   const executable = resolve(
     "local-web-release",
-    global.process.platform === "win32" ? "duo-killer-web.exe" : "duo-killer-web",
+    global.process.platform === "win32" ? "apple-buyer-web.exe" : "apple-buyer-web",
   );
   process = spawn(executable, [
     "--no-open",

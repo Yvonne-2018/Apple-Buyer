@@ -71,7 +71,7 @@ async function stop() {
   }
 }
 test.beforeAll(async () => {
-  directory = await mkdtemp(join(tmpdir(), "duo-killer-dev-web-"));
+  directory = await mkdtemp(join(tmpdir(), "apple-buyer-dev-web-"));
   const socket = createServer();
   await new Promise<void>((resolve) => socket.listen(0, "127.0.0.1", resolve));
   port = (socket.address() as { port: number }).port;

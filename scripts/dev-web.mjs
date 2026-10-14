@@ -168,7 +168,7 @@ async function main() {
   const executable = join(
     root,
     "local-web/target/debug",
-    process.platform === "win32" ? "duo-killer-web.exe" : "duo-killer-web",
+    process.platform === "win32" ? "apple-buyer-web.exe" : "apple-buyer-web",
   );
   const args = [
     "--dev-origin",
@@ -262,7 +262,7 @@ async function main() {
     await rm(temporary, { force: true });
   }
   console.log(
-    `\nDUO Killer · Web 开发\n${url}\n页面保存后自动更新；Python 修改在下一次操作生效。\n修改 Rust 后重启 pnpm dev:web；按 Ctrl+C 退出。\n`,
+    `\nApple-Buyer · Web 开发\n${url}\n页面保存后自动更新；Python 修改在下一次操作生效。\n修改 Rust 后重启 pnpm dev:web；按 Ctrl+C 退出。\n`,
   );
   openBrowser(url);
 }

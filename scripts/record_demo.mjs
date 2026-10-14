@@ -257,6 +257,8 @@ try {
     { qr },
   );
   await page.goto(base);
+  await expect(page).toHaveTitle("Apple-Buyer");
+  await expect(page.locator(".brand")).toContainText("Apple-Buyer");
   await page.addStyleTag({
     content: `html{scroll-padding-top:110px;scroll-padding-bottom:155px}body{padding-bottom:115px!important}.demo-caption{position:fixed;z-index:99999;left:24px;right:24px;bottom:20px;border-radius:14px;padding:18px 24px;background:#17212ef5;color:#fff;box-shadow:0 5px 24px #0002;pointer-events:none;font:17px/1.6 -apple-system,'PingFang SC',sans-serif}.demo-caption strong{display:block;font-size:21px}.demo-caption small{color:#c6cfdb}.demo-mark{position:fixed;z-index:99998;right:24px;top:12px;padding:7px 12px;border-radius:8px;background:#17212e;color:#fff;font:13px -apple-system,'PingFang SC',sans-serif;pointer-events:none}`,
   });
@@ -323,7 +325,7 @@ try {
   }
 
   await caption(
-    "01 · 登录准备",
+    "01 · Apple-Buyer 登录准备",
     "首次添加账号并完成验证；此处使用虚构账号、密码和验证码。",
   );
   await pause(1400);
@@ -434,7 +436,7 @@ try {
   await shot("template-demo-05-orders.png");
   await pause(3500);
   await caption(
-    "演示完成 · 配置一次，按序选店，执行到付款码",
+    "Apple-Buyer 演示完成 · 配置一次，按序选店，执行到付款码",
     "Mac M 系列 DMG / Windows 64 位 EXE 已支持 GitHub Actions 打包。",
   );
   await pause(3500);

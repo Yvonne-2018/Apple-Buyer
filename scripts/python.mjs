@@ -21,6 +21,6 @@ for (const [command, ...prefix] of candidates) {
   process.exit(result.status ?? 1);
 }
 console.error(
-  "开发任务需要 Python 3.10+。打包后的 DUO Killer 应用无需安装 Python。",
+  "开发任务需要 Python 3.10+。打包后的 Apple-Buyer 应用无需安装 Python。",
 );
 process.exit(1);

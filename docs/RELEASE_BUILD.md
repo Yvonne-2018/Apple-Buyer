@@ -1,4 +1,13 @@
-# GitHub 桌面安装包
+# Apple-Buyer 桌面安装包
+
+## 应用与安装包名称
+
+- 应用、窗口与系统安装项显示为 `Apple-Buyer`。
+- Mac M 系列：`Apple-Buyer_0.1.0_aarch64.dmg`，内含 `Apple-Buyer.app`。
+- Windows 64 位：`Apple-Buyer_0.1.0_x64-setup.exe`，主程序为 `apple-buyer.exe`。
+- GitHub Artifacts：`Apple-Buyer-mac-arm64`、`Apple-Buyer-win-x64`。
+- 内置业务进程为 `apple-buyer-worker`（Windows 带 `.exe`）；本地 Web 程序为 `apple-buyer-web`。
+- 保留原应用标识 `com.niulai.desktop`、Web 数据目录和凭据服务名，升级改名后仍读取原有账号、模板与设备信任。
 
 ## 构建范围
 
