@@ -206,7 +206,11 @@ def region_data(flow, path, wanted=None, *, prefer_current=False, pickup_search=
         payload = {path + '.' + k: data.get(k, '') for k in ('state', 'city', 'district', 'provinceCityDistrict')}
         payload.update({path + '.' + k: v for k, v in selected.items()})
         payload[path + '.countryCode'] = 'CN'
-        if chosen != data.get(key) and 'Select' + key in node.get('a', {}):
+        # Some checkout responses prefill the city after Selectstate but do not
+        # populate its districts until Selectcity is submitted explicitly.
+        load_pickup_districts = (pickup_search and key == 'city'
+                                 and not data.get('districtOptions'))
+        if (chosen != data.get(key) or load_pickup_districts) and 'Select' + key in node.get('a', {}):
             # 改省/市时不携带上一地区的下级选择。
             for child in ('city', 'district') if key == 'state' else ('district',) if key == 'city' else ():
                 payload[path + '.' + child] = ''
@@ -543,7 +547,11 @@ def pickup_search_data(flow, locator, search, saved_region):
                      for k in ('state', 'city', 'district', 'countryCode')})
         data[region + '.provinceCityDistrict'] = full_region
     else:
-        wanted = dict(saved_region) if normalize(search) == normalize(saved_region.get('city', '')) else {}
+        # The purchase form specifies a pickup city and store, not a district.
+        # A saved delivery district may be stale or absent from this account's
+        # checkout options; use it only for delivery, never as a pickup constraint.
+        same_saved_city = normalize(search) == normalize(saved_region.get('city', ''))
+        wanted = {'state': saved_region.get('state', '')} if same_saved_city else {}
         wanted['city'] = search
         if not wanted.get('state'):
             wanted['state'] = pickup_state(flow, current, search)

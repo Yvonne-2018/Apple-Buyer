@@ -810,12 +810,32 @@ class CrossCityPickupTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'district required'):
                 options.region_data(flow, path, {'state':'江苏','city':'苏州'})
 
-    def test_explicit_pickup_district_is_respected(self):
+    def test_saved_delivery_district_does_not_constrain_pickup(self):
         flow, path = self.flow()
         locator = path.removesuffix('.address.stateCitySelectorForCheckout')
         with patch.object(options, 'choose', side_effect=AssertionError('unexpected prompt')):
             data = options.pickup_search_data(flow, locator, '苏州', {'state':'江苏','city':'苏州','district':'吴中区'})
-        self.assertEqual(data[locator+'.searchInput'], '江苏 苏州 吴中区')
+        self.assertEqual(data[locator+'.searchInput'], '江苏 苏州 姑苏区')
+
+    def test_blank_region_ignores_saved_delivery_district(self):
+        flow, path = self.flow()
+        locator = path.removesuffix('.address.stateCitySelectorForCheckout')
+        node = flow.require(path)['d']
+        node.update(state='', city='', district='', provinceCityDistrict='',
+                    cityOptions=[], districtOptions=[])
+        original = flow.action
+        def action(module, name, data=None):
+            original(module, name, data)
+            if name == 'Selectstate':
+                node.update(city='无锡', cityOptions=[], districtOptions=[])
+            if name == 'Selectcity':
+                node.update(districtOptions=[{'value':'梁溪区'}, {'value':'滨湖区'}])
+        flow.action = action
+        with patch.object(options, 'choose', side_effect=AssertionError('unexpected prompt')):
+            data = options.pickup_search_data(flow, locator, '无锡',
+                {'state':'江苏','city':'无锡','district':'惠山区'})
+        self.assertEqual(data[locator+'.searchInput'], '江苏 无锡 梁溪区')
+        self.assertEqual([name for _, name, _ in flow.calls], ['Selectstate', 'Selectcity', 'Selectdistrict'])
 
 class PickupProvinceResolutionTests(unittest.TestCase):
     def test_blank_municipality_uses_fixed_city_and_live_districts(self):
