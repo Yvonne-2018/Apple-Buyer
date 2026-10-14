@@ -20,6 +20,7 @@
     "test:web": "node scripts/python.mjs tests/local_web/smoke.py",
     "test:web:ui": "playwright test --config playwright.web.config.ts",
     "dev:web": "node scripts/dev-web.mjs",
+    "demo:record": "node scripts/record_demo.mjs",
     "test:dev:web": "playwright test --config playwright.web.config.ts dev.spec.ts"
   },
   "dependencies": {
