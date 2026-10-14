@@ -22,7 +22,7 @@
 
 ## 仍需真实环境验收
 
-- [ ] Windows x64：GitHub CI 构建并静默安装 NSIS EXE，检查安装后的内置 worker。
+- [x] Windows x64：GitHub CI 构建并静默安装 NSIS EXE，检查安装后的内置 worker；Apple-Buyer 更名后的[双平台构建](https://github.com/Yvonne-2018/Apple-Buyer/actions/runs/38595694470)已通过（2026-10-15）。
 - Intel macOS：本次分发范围不包含。
 - [ ] 用户自己的真实登录、设备 / 短信二次认证、配送 / 自提与支付链路。
 - [ ] 正式对外发布前的代码签名、公证与安装测试。

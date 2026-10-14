@@ -4,7 +4,7 @@
 
 源文件：`assets/app-icon.png`（1254 × 1254，RGBA），使用内置 `image_gen` 生成，已保存在项目中。
 
-侧栏直接引用源文件；平台图标在 `src-tauri/icons`。重新生成平台格式：
+页面右下角背景引用源文件，侧栏显示 Apple-Buyer 应用名；平台图标在 `src-tauri/icons`。重新生成平台格式：
 
 ```sh
 pnpm exec tauri icon assets/app-icon.png -o src-tauri/icons

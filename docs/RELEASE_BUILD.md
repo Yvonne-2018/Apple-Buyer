@@ -32,6 +32,15 @@
 
 以上替代 `ORDER_TEMPLATES.md` 和 `PICKUP_STORES.md` 中早先的原有失败记录；云端各系统结果以具体 Actions 运行为准。
 
+## 2026-10-15 更名后验证
+
+[本次 GitHub Actions 构建与安装包](https://github.com/Yvonne-2018/Apple-Buyer/actions/runs/38595694470)，代码版本 `171433f`，Mac M 系列与 Windows 64 位均成功：
+
+- 两个平台各通过 307 项 worker 与 35 项界面测试；Mac 通过 22 项 Rust 测试，Windows 通过 21 项。
+- Mac 包内 worker 检查通过；本机另以只读方式挂载下载的 DMG，确认 `Apple-Buyer.app`、主程序 `apple-buyer`、原应用标识、arm64 主程序及 worker，严格签名校验和包内离线检查均通过。
+- Windows runner 使用 x86_64 Rust 工具链；EXE 静默安装成功，检查安装后的 `apple-buyer.exe` 和 `apple-buyer-worker.exe`，包内离线检查通过。未在本机 macOS 上运行 Windows 应用。
+- Artifacts 为 `Apple-Buyer-mac-arm64` 与 `Apple-Buyer-win-x64`，均已下载并核对安装包文件名。
+
 ## 签名与安装
 
 Mac 当前使用 ad hoc 签名，未配置 Apple Developer ID 及公证；Windows 未配置代码签名证书。安装包尚不能宣称已认证发布者，用户可能遇到系统提示。证书可在后续提供后配置，当前工作流不要求上传任何 Apple 账号、商城会话、订单或本机用户数据。

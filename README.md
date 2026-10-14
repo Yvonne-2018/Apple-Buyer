@@ -2,12 +2,11 @@
 
 面向 **iPhone DUO 抢购准备与快速下单** 的 Apple 中国在线商店辅助工具，支持 **Mac M 系列、Windows 64 位和本地 Web**。提前保存账号和下单模板，配置商品、数量、预算、联系人、配送或自提安排，一键执行到支付宝付款二维码，最后由本人扫码支付并查询订单。
 
-iPhone DUO launch assistant and Apple Store quick checkout tool for macOS, Windows and local Web. Built with Tauri, Rust, React and Python.
+Apple-Buyer is an Apple Store quick checkout tool for macOS, Windows and local Web, with iPhone DUO launch preparation. Built with Tauri, Rust, React and Python.
 
 ## 本次更新（2026-10-15）
 
 - **项目统一更名为 Apple-Buyer**：GitHub 仓库、界面左上角、窗口标题、应用及安装包名称同步调整；继续使用原有应用数据目录，保留已保存的账号、模板与设备信任。
-
 - **账号独立的下单模板**：新建、编辑、复制、删除、默认模板、草稿及从现有配置导入。完整模板保存后，正常下单过程无需重复输入业务信息，直接到付款码。
 - **自提城市与门店列表**：内置 Apple 中国大陆官方目录的 25 个城市、49 家直营店；选择城市后可多选门店、调整优先顺序。当前门店不可取货时自动尝试下一家，仅使用所选门店。
 - **提前配置执行规则**：订单总额上限、配送服务与运费上限、取货日期与每日时间范围、联系人、个人发票、等待到货及同机型替代 SKU 白名单。先尝试原 SKU 的全部所选门店，再按白名单顺序尝试替代配置。
@@ -39,7 +38,7 @@ iPhone DUO launch assistant and Apple Store quick checkout tool for macOS, Windo
 
 [▶ 观看 / 下载本地录制的操作视频（MP4）](docs/videos/template-checkout-demo.mp4)
 
-时长约 **1 分 15 秒**，1440 × 1000，中文字幕，无音轨。
+时长约 **1 分 21 秒**，1440 × 1000，中文字幕，无音轨。
 
 视频使用当前项目的本地 Web 界面，演示登录准备、模板配置、城市和门店多选、门店排序、限定取货时间、保存模板、一键执行、自动切店、演示付款码和订单查询。画面带有步骤字幕，**账号、库存、订单及二维码均为模拟数据，二维码不可付款，视频耗时不代表真实下单速度**。
 
@@ -56,7 +55,7 @@ iPhone DUO launch assistant and Apple Store quick checkout tool for macOS, Windo
 | Mac M 系列芯片（arm64） | `Apple-Buyer-mac-arm64` | 解压下载的 ZIP，打开 DMG，将应用拖入“应用程序” |
 | Windows 64 位（x64）    | `Apple-Buyer-win-x64`   | 解压下载的 ZIP，双击 `-setup.exe` 按向导安装   |
 
-[Apple-Buyer 双平台构建与下载入口](https://github.com/Yvonne-2018/Apple-Buyer/actions/workflows/build.yml)
+[本次已通过的 Apple-Buyer 双平台构建与下载入口](https://github.com/Yvonne-2018/Apple-Buyer/actions/runs/38595694470) · [全部桌面构建](https://github.com/Yvonne-2018/Apple-Buyer/actions/workflows/build.yml)
 
 在构建详情页底部 **Artifacts** 选择对应系统，产物保留 30 天。当前 Mac 使用临时签名、未做 Developer ID 公证，Windows 未配置发行证书，首次打开可能出现系统提示；具体说明见下方构建章节。
 

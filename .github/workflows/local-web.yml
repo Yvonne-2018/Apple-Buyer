@@ -38,8 +38,8 @@ jobs:
       - run: pnpm test:dev:web
       - name: Archive package (preserves macOS executable permissions)
         shell: bash
-        run: tar -czf local-web-${{ matrix.label }}.tar.gz local-web-release
+        run: tar -czf Apple-Buyer-local-web-${{ matrix.label }}.tar.gz local-web-release
       - uses: actions/upload-artifact@v4
         with:
           name: Apple-Buyer-local-web-${{ matrix.label }}
-          path: local-web-${{ matrix.label }}.tar.gz
+          path: Apple-Buyer-local-web-${{ matrix.label }}.tar.gz
