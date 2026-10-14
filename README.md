@@ -37,7 +37,7 @@ iPhone DUO launch assistant and Apple Store quick checkout tool for macOS, Windo
 
 [▶ 观看 / 下载本地录制的操作视频（MP4）](docs/videos/template-checkout-demo.mp4)
 
-时长约 **1 分 16 秒**，1440 × 1000，中文字幕及普通话配音。
+时长约 **1 分 15 秒**，1440 × 1000，中文字幕，无音轨。
 
 视频使用当前项目的本地 Web 界面，演示登录准备、模板配置、城市和门店多选、门店排序、限定取货时间、保存模板、一键执行、自动切店、演示付款码和订单查询。画面带有步骤字幕，**账号、库存、订单及二维码均为模拟数据，二维码不可付款，视频耗时不代表真实下单速度**。
 
@@ -205,7 +205,7 @@ pnpm build:web
 
 ## 重新生成演示视频
 
-在 macOS 本机准备上述 Node / Python 开发环境、系统“婷婷”普通话音色（`say -v Tingting`），以及 `ffmpeg`（含 `ffprobe` 和 H.264 编码支持）。录制使用独立浏览器上下文和本地 Vite 页面，通过模拟接口展示操作，不读取本机 Apple 账号，不请求 Apple，不发生真实下单或支付。
+准备上述 Node / Python 开发环境，并在本机安装 `ffmpeg`（需支持 H.264 编码）。录制使用独立浏览器上下文和本地 Vite 页面，通过模拟接口展示操作，不读取本机 Apple 账号，不请求 Apple，不发生真实下单或支付。
 
 ```sh
 pnpm install --frozen-lockfile
@@ -214,15 +214,7 @@ pnpm exec playwright install chromium
 pnpm demo:record
 ```
 
-输出有声 MP4 至 `docs/videos/template-checkout-demo.mp4`，同时刷新 `docs/images/template-demo-*.png` 操作截图。录制完成后，系统语音逐段合成普通话旁白，ffmpeg 按字幕实际切换时间剪辑画面、统一音量并合并 AAC 音轨；较长的讲解通过定格本段末帧补足时间，避免讲解跨到下一步。
-
-修改 [配音文稿](docs/videos/template-checkout-demo-narration.json) 后，可对本机已有的原始录屏单独重新配音：
-
-```sh
-pnpm demo:voice
-```
-
-无声原片与章节记录保存在 `artifacts/demo-recording/`，分段语音、剪辑文件和对齐记录保存在 `artifacts/demo-voice/`，均被 Git 忽略。有声 MP4 可在其他平台直接播放；重新生成旁白当前使用 macOS 系统语音。录屏仅用于文档演示，未加入常规测试或安装包构建流程。
+输出 MP4 至 `docs/videos/template-checkout-demo.mp4`，同时刷新 `docs/images/template-demo-*.png` 操作截图。视频包含中文步骤字幕，无音轨；录制原始文件及步骤时间记录保存在被 Git 忽略的 `artifacts/demo-recording/`。录屏仅用于文档演示，未加入常规测试或安装包构建流程。
 
 ## 隐私与免责声明
 
