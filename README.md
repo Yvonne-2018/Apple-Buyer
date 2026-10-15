@@ -36,15 +36,15 @@ Apple-Buyer is an Apple Store quick checkout tool for macOS, Windows and local W
 
 ## 视频演示
 
-[▶ 观看 / 下载本地录制的操作视频（MP4）](docs/videos/template-checkout-demo.mp4)
+[▶ 在抖音观看 Apple-Buyer 操作演示（有声）](https://www.douyin.com/user/self?modal_id=7696709298776231222)
 
-时长约 **1 分 21 秒**，1440 × 1000，中文字幕，无音轨。
+视频包含中文步骤字幕和普通话旁白。
 
 视频使用当前项目的本地 Web 界面，演示登录准备、模板配置、城市和门店多选、门店排序、限定取货时间、保存模板、一键执行、自动切店、演示付款码和订单查询。画面带有步骤字幕，**账号、库存、订单及二维码均为模拟数据，二维码不可付款，视频耗时不代表真实下单速度**。
 
-[![模板配置与门店顺序演示，点击打开 MP4](docs/images/template-demo-03-summary.png)](docs/videos/template-checkout-demo.mp4)
+[![模板配置与门店顺序演示，点击在抖音观看](docs/images/template-demo-03-summary.png)](https://www.douyin.com/user/self?modal_id=7696709298776231222)
 
-本地文件：`docs/videos/template-checkout-demo.mp4`。重新录制方法见文末“重新生成演示视频”。
+仓库内保留[无声录屏原片（MP4）](docs/videos/template-checkout-demo.mp4)。重新录制方法见文末“重新生成演示视频”。
 
 ## 安装与下载
 
