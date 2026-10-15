@@ -19,6 +19,14 @@
 
 工作流：`.github/workflows/build.yml`。手动运行或 `v*` 标签触发，不创建 Release。运行结束后下载对应 Artifacts（保留 30 天），解压得到安装文件。
 
+## Release 下载
+
+普通使用者请从 [GitHub Releases](https://github.com/Yvonne-2018/Apple-Buyer/releases/latest) 直接下载 DMG 或 EXE。
+
+- [Apple-Buyer v0.1.0](https://github.com/Yvonne-2018/Apple-Buyer/releases/tag/v0.1.0) 提供 Mac M 系列和 Windows 64 位安装包。
+- 标签 `v0.1.0` 指向实际构建安装包的代码版本 `171433f57416de4b328d5f2ab4dc3eebe653528b`，对应下方的更名后验证记录。
+- 本次手动发布已验证的安装包，不改变工作流的自动发布行为；上传前按原构建记录核对两份安装包的 SHA-256。
+
 ## 构建检查
 
 两种系统均执行完整 worker、Rust、Playwright 测试和冻结 worker 冒烟检查。安装包构建后，Mac 检查 `.app` 内的 worker，Windows 在 runner 临时目录静默安装并检查主程序和 worker。

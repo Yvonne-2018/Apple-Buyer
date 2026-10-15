@@ -50,14 +50,16 @@ Apple-Buyer is an Apple Store quick checkout tool for macOS, Windows and local W
 
 普通使用者可直接下载安装包，安装后无需准备 Python、Node 或 Rust 开发环境。
 
-| 系统                    | GitHub 构建产物         | 安装方法                                       |
-| ----------------------- | ----------------------- | ---------------------------------------------- |
-| Mac M 系列芯片（arm64） | `Apple-Buyer-mac-arm64` | 解压下载的 ZIP，打开 DMG，将应用拖入“应用程序” |
-| Windows 64 位（x64）    | `Apple-Buyer-win-x64`   | 解压下载的 ZIP，双击 `-setup.exe` 按向导安装   |
+[前往 GitHub Releases 下载最新版](https://github.com/Yvonne-2018/Apple-Buyer/releases/latest)
 
-[本次已通过的 Apple-Buyer 双平台构建与下载入口](https://github.com/Yvonne-2018/Apple-Buyer/actions/runs/38595694470) · [全部桌面构建](https://github.com/Yvonne-2018/Apple-Buyer/actions/workflows/build.yml)
+| 系统                    | 安装包                                                                                                                                 | 安装方法                       |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Mac M 系列芯片（arm64） | [Apple-Buyer_0.1.0_aarch64.dmg](https://github.com/Yvonne-2018/Apple-Buyer/releases/download/v0.1.0/Apple-Buyer_0.1.0_aarch64.dmg)     | 打开 DMG，将应用拖入“应用程序” |
+| Windows 64 位（x64）    | [Apple-Buyer_0.1.0_x64-setup.exe](https://github.com/Yvonne-2018/Apple-Buyer/releases/download/v0.1.0/Apple-Buyer_0.1.0_x64-setup.exe) | 双击 EXE，按向导安装           |
 
-在构建详情页底部 **Artifacts** 选择对应系统，产物保留 30 天。当前 Mac 使用临时签名、未做 Developer ID 公证，Windows 未配置发行证书，首次打开可能出现系统提示；具体说明见下方构建章节。
+[v0.1.0 发布说明](https://github.com/Yvonne-2018/Apple-Buyer/releases/tag/v0.1.0) · [本版构建与验证记录](https://github.com/Yvonne-2018/Apple-Buyer/actions/runs/38595694470) · [全部桌面构建](https://github.com/Yvonne-2018/Apple-Buyer/actions/workflows/build.yml)
+
+Release 附件提供 DMG 和 EXE 直接下载。Actions 的 Artifacts 保留 30 天，供查看构建产物。当前 Mac 使用临时签名、未做 Developer ID 公证，Windows 未配置发行证书，首次打开可能出现系统提示；具体说明见下方构建章节。
 
 ## 支持平台
 
@@ -192,6 +194,8 @@ pnpm bundle
 - **Apple-Buyer-win-x64**：`Apple-Buyer_0.1.0_x64-setup.exe`，适用于 Windows 64 位。
 
 每个平台先执行 worker、Rust、界面测试，再构建安装包并检查内置 worker。Windows runner 还会静默安装，核对主程序和内置 worker。构建成功后在本次运行的 **Artifacts** 下载；GitHub 会将产物打成 ZIP，解压后使用里面的 DMG 或 EXE。产物保留 30 天。当前不构建 Intel Mac，不自动生成 Web 包，也不自动发布 GitHub Release。Web 工作流保留手动运行入口。
+
+已发布版本的安装包见 [GitHub Releases](https://github.com/Yvonne-2018/Apple-Buyer/releases/latest)，可直接下载 DMG 或 EXE。`v0.1.0` 使用上述已通过检查的构建产物，人工上传发布。
 
 ### 构建 Web 版
 
